@@ -60,7 +60,6 @@
 
 		"mkspecs",
 		"qt",
-		"lib/cmake",
 
 	],
 

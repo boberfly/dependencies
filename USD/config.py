@@ -96,6 +96,9 @@
 		"plugin/usd",
 		"share/usd",
 
+		"pxrConfig.cmake",
+		"cmake",
+
 	],
 
 	"variant:Python:3" : {

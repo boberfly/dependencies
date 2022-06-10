@@ -372,7 +372,7 @@ def __buildPackage( projects, configs, buildDir, package ) :
 	sys.stderr.write( "Building package {}\n".format( package ) )
 
 	visited = set()
-	files = { "doc/licenses" }
+	files = { "doc/licenses", "lib/cmake" }
 	projectManifest = []
 
 	def walk( project, configs, buildDir ) :
