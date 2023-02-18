@@ -1,3 +1,8 @@
+8.0.0 (relative to 7.0.0)
+-----
+
+- OpenImageDenoise : Added version 1.4.3.
+
 7.0.0 (relative to 6.0.0)
 -----
 
