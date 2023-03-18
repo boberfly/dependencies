@@ -55,6 +55,7 @@
 
 		"include/OpenColorIO",
 		"lib/libOpenColorIO*{sharedLibraryExtension}*",
+		"lib/cmake/OpenColorIO",
 		"openColorIO",
 		"python/PyOpenColorIO*",
 
