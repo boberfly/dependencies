@@ -2,7 +2,7 @@
 
 	"downloads" : [
 
-		"https://github.com/blender/cycles/archive/refs/tags/v3.5.0.tar.gz",
+		"https://github.com/blender/cycles/archive/refs/tags/v3.6.0.tar.gz",
 
 	],
 
@@ -22,8 +22,10 @@
 			" -D CMAKE_BUILD_TYPE=Release"
 			" -D WITH_CYCLES_OPENIMAGEDENOISE=ON"
 			" -D WITH_CYCLES_PATH_GUIDING=ON"
-			" -D WITH_CYCLES_DEVICE_CUDA=OFF"
-			" -D WITH_CYCLES_DEVICE_OPTIX=OFF"
+			" -D WITH_CYCLES_DEVICE_CUDA=ON"
+			" -D WITH_CYCLES_DEVICE_OPTIX=ON"
+            " -D WITH_CYCLES_CUDA_BINARIES=ON"
+            " -D OPTIX_ROOT_DIR={optixDir}"
 			" -D WITH_CYCLES_HYDRA_RENDER_DELEGATE=OFF"
 			" -D CMAKE_POSITION_INDEPENDENT_CODE=ON"
 			" -D WITH_CYCLES_USD=OFF"

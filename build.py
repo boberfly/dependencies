@@ -471,7 +471,9 @@ variables = {
 	"sharedLibraryExtension" : ".dylib" if sys.platform == "darwin" else ".so",
 	"c++Standard" : "17",
 	"compilerRoot" : __compilerRoot(),
+	"cmakeGenerator" : "\"NMake Makefiles JOM\"" if sys.platform == "win32" else "\"Unix Makefiles\"",
 	"variants" : "".join( "-{}{}".format( key, variants[key] ) for key in sorted( variants.keys() ) ),
+	"optixDir" : os.environ["OPTIX_ROOT"],
 }
 
 configs = __loadConfigs( variables, variants )
