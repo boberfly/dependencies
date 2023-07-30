@@ -2,7 +2,7 @@
 
 	"downloads" : [
 
-		"https://github.com/AcademySoftwareFoundation/OpenShadingLanguage/archive/refs/tags/v1.12.9.0.tar.gz"
+		"https://github.com/AcademySoftwareFoundation/OpenShadingLanguage/archive/7a885c68b608743213811f612edaaa505a716205.tar.gz"
 
 	],
 
@@ -35,6 +35,7 @@
 			" -D ENABLERTTI=1"
 			" -D LLVM_STATIC=1"
 			" -D USE_BATCHED={useBatched}"
+            " -D USE_LLVM_BITCODE=OFF"
 			" -D OSL_SHADER_INSTALL_DIR={buildDir}/shaders"
 			" -D Python_ROOT_DIR={buildDir}"
 			" -D Python_FIND_STRATEGY=LOCATION"
