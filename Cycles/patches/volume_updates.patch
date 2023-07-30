@@ -1,0 +1,53 @@
+From 1af3e0c0a70323e57ea93d34a0fc70fb58c463e1 Mon Sep 17 00:00:00 2001
+From: Alex <boberfly@gmail.com>
+Date: Wed, 26 Jul 2023 12:59:12 +1000
+Subject: [PATCH] On shader changes, make sure these are uploaded in the cases
+ where an expensive object rebuild isn't required.
+
+---
+ src/scene/geometry.cpp | 27 ++++++++++++++++-----------
+ 1 file changed, 16 insertions(+), 11 deletions(-)
+
+diff --git a/src/scene/geometry.cpp b/src/scene/geometry.cpp
+index c32b584d..f14fccfb 100644
+--- a/src/scene/geometry.cpp
++++ b/src/scene/geometry.cpp
+@@ -435,19 +435,24 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
+     /* Re-create volume mesh if we will rebuild or refit the BVH. Note we
+      * should only do it in that case, otherwise the BVH and mesh can go
+      * out of sync. */
+-    if (geom->is_modified() && geom->geometry_type == Geometry::VOLUME) {
+-      /* Create volume meshes if there is voxel data. */
+-      if (!volume_images_updated) {
+-        progress.set_status("Updating Meshes Volume Bounds");
+-        device_update_volume_images(device, scene, progress);
+-        volume_images_updated = true;
+-      }
++    if (geom->is_volume()) {
++      if (geom->need_update_rebuild) {
++        /* Create volume meshes if there is voxel data. */
++        if (!volume_images_updated) {
++          progress.set_status("Updating Meshes Volume Bounds");
++          device_update_volume_images(device, scene, progress);
++          volume_images_updated = true;
++        }
+ 
+-      Volume *volume = static_cast<Volume *>(geom);
+-      create_volume_mesh(scene, volume, progress);
++        Volume *volume = static_cast<Volume *>(geom);
++        create_volume_mesh(scene, volume, progress);
+ 
+-      /* always reallocate when we have a volume, as we need to rebuild the BVH */
+-      device_update_flags |= DEVICE_MESH_DATA_NEEDS_REALLOC;
++        /* always reallocate when we have a volume, as we need to rebuild the BVH */
++        device_update_flags |= DEVICE_MESH_DATA_NEEDS_REALLOC;
++      }
++      else if (geom->is_modified()) {
++        device_update_flags |= DEVICE_MESH_DATA_MODIFIED;
++      }
+     }
+ 
+     if (geom->is_hair()) {
+-- 
+2.39.2
+
