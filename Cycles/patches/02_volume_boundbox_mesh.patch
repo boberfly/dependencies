@@ -1,0 +1,178 @@
+From d68c162f29f6aad9323a25068456a94c2f18e03a Mon Sep 17 00:00:00 2001
+From: Alex <boberfly@gmail.com>
+Date: Fri, 18 Aug 2023 14:20:42 +1000
+Subject: [PATCH] Volumes now have a toggle to use the bounding box of a vdb
+ instead of generating a mesh
+
+---
+ src/scene/volume.cpp | 85 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/scene/volume.h   |  1 +
+ 2 files changed, 86 insertions(+)
+
+diff --git a/src/scene/volume.cpp b/src/scene/volume.cpp
+index 3fd6bd4..cd4a82d 100644
+--- a/src/scene/volume.cpp
++++ b/src/scene/volume.cpp
+@@ -14,6 +14,7 @@
+ #  include <openvdb/tools/Statistics.h>
+ #endif
+ 
++#include "util/boundbox.h"
+ #include "util/hash.h"
+ #include "util/log.h"
+ #include "util/openvdb.h"
+@@ -30,6 +31,7 @@ NODE_DEFINE(Volume)
+   SOCKET_FLOAT(step_size, "Step Size", 0.0f);
+   SOCKET_BOOLEAN(object_space, "Object Space", false);
+   SOCKET_FLOAT(velocity_scale, "Velocity Scale", 1.0f);
++  SOCKET_BOOLEAN(use_boundbox_mesh, "Use Boundbox Mesh", false);
+ 
+   return type;
+ }
+@@ -92,6 +94,8 @@ const float3 quads_normals[6] = {
+     make_float3(0.0f, 0.0f, 1.0f),
+ };
+ 
++const float voxel_pad_size = 0.5f;
++
+ static int add_vertex(int3 v,
+                       vector<int3> &vertices,
+                       int3 res,
+@@ -145,6 +149,7 @@ class VolumeMeshBuilder {
+   openvdb::MaskGrid::Ptr topology_grid;
+   openvdb::CoordBBox bbox;
+ #endif
++  BoundBox boundbox_mesh_bbox;
+   bool first_grid;
+ 
+   VolumeMeshBuilder();
+@@ -162,6 +167,12 @@ class VolumeMeshBuilder {
+ 
+   void generate_vertices_and_quads(vector<int3> &vertices_is, vector<QuadData> &quads);
+ 
++#ifdef WITH_OPENVDB
++  void grow_boundbox(openvdb::GridBase::ConstPtr grid, float padding = voxel_pad_size);
++#endif
++
++  void create_boundbox_mesh(Mesh *mesh);
++
+   void convert_object_space(const vector<int3> &vertices,
+                             vector<float3> &out_vertices,
+                             const float face_overlap_avoidance);
+@@ -200,6 +211,8 @@ class VolumeMeshBuilder {
+ VolumeMeshBuilder::VolumeMeshBuilder()
+ {
+   first_grid = true;
++  boundbox_mesh_bbox.min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
++  boundbox_mesh_bbox.max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+ }
+ 
+ #ifdef WITH_OPENVDB
+@@ -376,6 +389,66 @@ void VolumeMeshBuilder::generate_vertices_and_quads(vector<ccl::int3> &vertices_
+ #endif
+ }
+ 
++#ifdef WITH_OPENVDB
++void VolumeMeshBuilder::grow_boundbox(openvdb::GridBase::ConstPtr grid, float padding)
++{
++  openvdb::Vec3i min = grid->metaValue<openvdb::Vec3i>(grid->META_FILE_BBOX_MIN);
++  openvdb::Vec3i max = grid->metaValue<openvdb::Vec3i>(grid->META_FILE_BBOX_MAX);
++
++  openvdb::Vec3d offset = openvdb::Vec3d(padding);
++  openvdb::BBoxd index_bounds = openvdb::BBoxd(min - offset, max + offset);
++  openvdb::BBoxd world_bounds = grid->transform().indexToWorld(index_bounds);
++  openvdb::Vec3d min_bb = world_bounds.min();
++  openvdb::Vec3d max_bb = world_bounds.max();
++
++  boundbox_mesh_bbox.grow(BoundBox(make_float3(min_bb[0], min_bb[1], min_bb[2]),
++                                   make_float3(max_bb[0], max_bb[1], max_bb[2])));
++}
++#endif
++
++void VolumeMeshBuilder::create_boundbox_mesh(Mesh *mesh)
++{
++  mesh->clear(true);
++  mesh->reserve_mesh(8, 12);
++
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.max.x, boundbox_mesh_bbox.max.y, boundbox_mesh_bbox.max.z));
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.max.x, boundbox_mesh_bbox.max.y, boundbox_mesh_bbox.min.z));
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.max.x, boundbox_mesh_bbox.min.y, boundbox_mesh_bbox.max.z));
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.max.x, boundbox_mesh_bbox.min.y, boundbox_mesh_bbox.min.z));
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.min.x, boundbox_mesh_bbox.max.y, boundbox_mesh_bbox.max.z));
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.min.x, boundbox_mesh_bbox.max.y, boundbox_mesh_bbox.min.z));
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.min.x, boundbox_mesh_bbox.min.y, boundbox_mesh_bbox.max.z));
++  mesh->add_vertex(make_float3(boundbox_mesh_bbox.min.x, boundbox_mesh_bbox.min.y, boundbox_mesh_bbox.min.z));
++
++  mesh->add_triangle(4, 2, 0, 0, false);
++  mesh->add_triangle(2, 7, 3, 0, false);
++  mesh->add_triangle(6, 5, 7, 0, false);
++  mesh->add_triangle(1, 7, 5, 0, false);
++  mesh->add_triangle(0, 3, 1, 0, false);
++  mesh->add_triangle(4, 1, 5, 0, false);
++  mesh->add_triangle(4, 6, 2, 0, false);
++  mesh->add_triangle(2, 6, 7, 0, false);
++  mesh->add_triangle(6, 4, 5, 0, false);
++  mesh->add_triangle(1, 3, 7, 0, false);
++  mesh->add_triangle(0, 2, 3, 0, false);
++  mesh->add_triangle(4, 0, 1, 0, false);
++
++  Attribute *attr_fN = mesh->attributes.add(ATTR_STD_FACE_NORMAL);
++  float3 *fN = attr_fN->data_float3();
++  fN[0] = make_float3(0, 0, 1);
++  fN[1] = make_float3(0, -1, 0);
++  fN[2] = make_float3(-1, 0, 0);
++  fN[3] = make_float3(0, 0, -1);
++  fN[4] = make_float3(1, 0, 0);
++  fN[5] = make_float3(0, 1, 0);
++  fN[6] = make_float3(0, 0, 1);
++  fN[7] = make_float3(0, -1, 0);
++  fN[8] = make_float3(-1, 0, 0);
++  fN[9] = make_float3(0, 0, -1);
++  fN[10] = make_float3(1, 0, 0);
++  fN[11] = make_float3(0, 1, 0);
++}
++
+ void VolumeMeshBuilder::convert_object_space(const vector<int3> &vertices,
+                                              vector<float3> &out_vertices,
+                                              const float face_overlap_avoidance)
+@@ -722,6 +795,10 @@ void GeometryManager::create_volume_mesh(const Scene *scene, Volume *volume, Pro
+       }
+ 
+       builder.add_grid(grid, do_clipping, volume->get_clipping());
++
++      if (volume->get_use_boundbox_mesh()) {
++        builder.grow_boundbox(grid, pad_size > voxel_pad_size ? pad_size : voxel_pad_size);
++      }
+     }
+   }
+ #else
+@@ -733,6 +810,14 @@ void GeometryManager::create_volume_mesh(const Scene *scene, Volume *volume, Pro
+     return;
+   }
+ 
++  if (volume->get_use_boundbox_mesh()) {
++    builder.create_boundbox_mesh((Mesh *)volume);
++    array<Node *> used_shaders;
++    used_shaders.push_back_slow(volume_shader);
++    volume->set_used_shaders(used_shaders);
++    return;
++  }
++
+   builder.add_padding(pad_size);
+ 
+   /* Slightly offset vertex coordinates to avoid overlapping faces with other
+diff --git a/src/scene/volume.h b/src/scene/volume.h
+index 6955f3f..b43cd79 100644
+--- a/src/scene/volume.h
++++ b/src/scene/volume.h
+@@ -20,6 +20,7 @@ class Volume : public Mesh {
+   NODE_SOCKET_API(float, step_size)
+   NODE_SOCKET_API(bool, object_space)
+   NODE_SOCKET_API(float, velocity_scale)
++  NODE_SOCKET_API(bool, use_boundbox_mesh)
+ 
+   virtual void clear(bool preserve_shaders = false) override;
+ };
+-- 
+1.8.3.1
+
