@@ -30,7 +30,6 @@
 			" -skip qtconnectivity"
 			" -skip qtwebengine"
 			" -skip qt3d"
-			" -skip qtdeclarative"
 			" -skip qtwebchannel"
 			" -no-libudev"
 			" -no-icu"
