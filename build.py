@@ -295,6 +295,9 @@ def __buildProject( project, config, buildDir, cleanup ) :
 	decompressedArchives = [ __decompress( "../../" + a, cleanup ) for a in archives ]
 	os.chdir( config.get( "workingDir", decompressedArchives[0] ) )
 
+	for patch in glob.glob( "../../patches/*.patch" ) :
+		subprocess.check_call( "patch -p1 < {patch}".format( patch = patch ), shell = True )
+
 	if config["license"] is not None :
 		licenseDir = os.path.join( buildDir, "doc/licenses" )
 		licenseDest = os.path.join( licenseDir, project )
@@ -306,9 +309,6 @@ def __buildProject( project, config, buildDir, cleanup ) :
 			if os.path.exists( licenseDest ) :
 				shutil.rmtree( licenseDest )
 			shutil.copytree( config["license"], licenseDest )
-
-	for patch in glob.glob( "../../patches/*.patch" ) :
-		subprocess.check_call( "patch -p1 < {patch}".format( patch = patch ), shell = True )
 
 	environment = os.environ.copy()
 	for k, v in config.get( "environment", {} ).items() :
