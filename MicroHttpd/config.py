@@ -10,12 +10,18 @@
 
 	"license" : "COPYING",
 
-	"dependencies" : [],
-
 	"commands" : [
 
-		"./configure --prefix {buildDir}",
-		"make install",
+		"mkdir moonrayBuild",
+		"cd moonrayBuild &&"
+			" cmake"
+			" -D CMAKE_INSTALL_PREFIX={buildDir}"
+			" -D ENABLE_TESTS=NO"
+			" -D ENABLE_EXAMPLES=NO"
+			" -D ENABLE_DOC=NO"
+			" -D ENABLE_HTTPS=NO" # todo: check if needed
+			" ..",
+		"cd moonrayBuild && cmake --build . --config Release --target install -- {jobs}",
 
 	],
 

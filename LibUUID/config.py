@@ -11,12 +11,12 @@
 
 	"commands" : [
 
-		"mkdir gafferBuild",
-		"cd gafferBuild &&"
+		"mkdir moonrayBuild",
+		"cd moonrayBuild &&"
 			" cmake"
 			" -D CMAKE_INSTALL_PREFIX={buildDir}"
 			" ..",
-		"cd gafferBuild && make install -j {jobs} VERBOSE=1",
+		"cd moonrayBuild && cmake --build . --config Release --target install -- {jobs}",
 
 	],
 

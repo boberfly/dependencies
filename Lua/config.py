@@ -2,7 +2,7 @@
 
 	"downloads" : [
 
-		"https://www.lua.org/ftp/lua-5.4.6.tar.gz"
+		"https://www.lua.org/ftp/lua-5.4.7.tar.gz"
 
 	],
 
@@ -14,10 +14,16 @@
 
 	"commands" : [
 
-		"make generic MYCFLAGS=-fPIC MYLIBS=-ldl",
-		"cp src/lua src/luac {buildDir}/bin",
-		"cp src/lua.h src/luaconf.h src/lualib.h src/lauxlib.h src/lua.hpp {buildDir}/include",
-		"cp src/liblua.a {buildDir}/lib",
+		"mkdir moonrayBuild",
+		"cd moonrayBuild &&"
+			" cmake"
+			" -D CMAKE_INSTALL_PREFIX={buildDir}"
+			" -D LUA_ENABLE_TESTING=OFF"
+			" -D LUA_ENABLE_SHARED=OFF"
+			" -D LUA_BUILD_BINARY=ON"
+			" -D LUA_BUILD_COMPILER=ON"
+			" ..",
+		"cd moonrayBuild && cmake --build . --config Release --target install -- {jobs}",
 
 	],
 
@@ -26,7 +32,7 @@
 		"bin/lua*",
 		"include/lua*",
 		"include/lauxlib.h"
-		"lib/liblua*",
+		"lib/*lua*",
 
 	],
 

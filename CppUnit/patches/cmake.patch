@@ -1,0 +1,324 @@
+From e3eb6a5041fceaba2a2218e6d186f0a2ad3b415c Mon Sep 17 00:00:00 2001
+From: Alex Fuller <alex.fuller@flyingbark.com.au>
+Date: Wed, 31 Jul 2024 11:05:45 +1000
+Subject: [PATCH] CMake
+
+---
+ CMakeLists.txt         | 104 ++++++++++++++++++++++++
+ config-auto.h.in       | 179 +++++++++++++++++++++++++++++++++++++++++
+ cppunitConfig.cmake.in |   4 +
+ 3 files changed, 287 insertions(+)
+ create mode 100644 CMakeLists.txt
+ create mode 100644 config-auto.h.in
+ create mode 100644 cppunitConfig.cmake.in
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+index 0000000..4ab977e
+--- /dev/null
++++ b/CMakeLists.txt
+@@ -0,0 +1,104 @@
++cmake_minimum_required(VERSION 3.1)
++project(cppunit)
++
++option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
++
++set(CPPUNIT_PACKAGE_NAME cppunit CACHE STRING "Name of the package to build.")
++set(CPPUNIT_MAJOR_VERSION 1 CACHE STRING "Major (first) version number.")
++set(CPPUNIT_MINOR_VERSION 15 CACHE STRING "Minor (second) version number.")
++set(CPPUNIT_PATCH_VERSION 1 CACHE STRING "Patch (third) version number.")
++set(CPPUNIT_VERSION "${CPPUNIT_MAJOR_VERSION}.${CPPUNIT_MINOR_VERSION}.${CPPUNIT_PATCH_VERSION}")
++
++set(CMAKE_CXX_STANDARD 17)
++
++set(Sources
++    src/cppunit/AdditionalMessage.cpp
++    src/cppunit/Asserter.cpp
++    src/cppunit/BriefTestProgressListener.cpp
++    src/cppunit/CompilerOutputter.cpp
++    src/cppunit/DefaultProtector.cpp
++    #src/cppunit/DllMain.cpp #Apparently this one isn't built.
++    src/cppunit/DynamicLibraryManager.cpp
++    src/cppunit/DynamicLibraryManagerException.cpp
++    src/cppunit/Exception.cpp
++    src/cppunit/Message.cpp
++    src/cppunit/PlugInManager.cpp
++    src/cppunit/PlugInParameters.cpp
++    src/cppunit/Protector.cpp
++    src/cppunit/ProtectorChain.cpp
++    src/cppunit/RepeatedTest.cpp
++    src/cppunit/ShlDynamicLibraryManager.cpp
++    src/cppunit/SourceLine.cpp
++    src/cppunit/StringTools.cpp
++    src/cppunit/SynchronizedObject.cpp
++    src/cppunit/Test.cpp
++    src/cppunit/TestAssert.cpp
++    src/cppunit/TestCase.cpp
++    src/cppunit/TestCaseDecorator.cpp
++    src/cppunit/TestComposite.cpp
++    src/cppunit/TestDecorator.cpp
++    src/cppunit/TestFactoryRegistry.cpp
++    src/cppunit/TestFailure.cpp
++    src/cppunit/TestLeaf.cpp
++    src/cppunit/TestNamer.cpp
++    src/cppunit/TestPath.cpp
++    src/cppunit/TestPlugInDefaultImpl.cpp
++    src/cppunit/TestResult.cpp
++    src/cppunit/TestResultCollector.cpp
++    src/cppunit/TestRunner.cpp
++    src/cppunit/TestSetUp.cpp
++    src/cppunit/TestSuccessListener.cpp
++    src/cppunit/TestSuite.cpp
++    src/cppunit/TestSuiteBuilderContext.cpp
++    src/cppunit/TextOutputter.cpp
++    src/cppunit/TextTestProgressListener.cpp
++    src/cppunit/TextTestResult.cpp
++    src/cppunit/TextTestRunner.cpp
++    src/cppunit/TypeInfoHelper.cpp
++    src/cppunit/UnixDynamicLibraryManager.cpp
++    src/cppunit/Win32DynamicLibraryManager.cpp
++    src/cppunit/XmlDocument.cpp
++    src/cppunit/XmlElement.cpp
++    src/cppunit/XmlOutputter.cpp
++    src/cppunit/XmlOutputterHook.cpp
++)
++set(HeaderDirs
++    src/cppunit
++    include
++)
++
++configure_file("config-auto.h.in" "cppunit/config-auto.h")
++
++#Build cppunit's library.
++include_directories(${HeaderDirs} ${CMAKE_BINARY_DIR})
++add_library(cppunit ${Sources})
++
++#Installation.
++include(GNUInstallDirs)
++install(TARGETS cppunit
++    EXPORT cppunit-targets
++    DESTINATION ${CMAKE_INSTALL_LIBDIR}
++)
++
++install(EXPORT cppunit-targets
++    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cppunit
++)
++
++install(
++    DIRECTORY include
++    DESTINATION ${CMAKE_INSTALL_PREFIX}
++    FILES_MATCHING PATTERN *.h
++#    REGEX "msvc6" EXCLUDE
++)
++
++install(FILES ${CMAKE_BINARY_DIR}/cppunit/config-auto.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cppunit)
++
++include(CMakePackageConfigHelpers)
++configure_package_config_file(cppunitConfig.cmake.in ${CMAKE_BINARY_DIR}/cppunitConfig.cmake INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cppunit)
++write_basic_package_version_file(${CMAKE_BINARY_DIR}/cppunitConfigVersion.cmake VERSION ${CPPUNIT_VERSION} COMPATIBILITY SameMajorVersion)
++
++install(FILES
++    ${CMAKE_BINARY_DIR}/cppunitConfig.cmake
++    ${CMAKE_BINARY_DIR}/cppunitConfigVersion.cmake
++    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cppunit
++)
+\ No newline at end of file
+diff --git a/config-auto.h.in b/config-auto.h.in
+new file mode 100644
+index 0000000..f8b7b0b
+--- /dev/null
++++ b/config-auto.h.in
+@@ -0,0 +1,179 @@
++#ifndef _INCLUDE_CPPUNIT_CONFIG_AUTO_H
++#define _INCLUDE_CPPUNIT_CONFIG_AUTO_H 1
++ 
++/* include/cppunit/config-auto.h. Generated automatically at end of configure. */
++/* config/config.h.  Generated from config.h.in by configure.  */
++/* config/config.h.in.  Generated from configure.in by autoheader.  */
++
++/* define if library uses std::string::compare(string,pos,n) */
++/* #undef CPPUNIT_FUNC_STRING_COMPARE_STRING_FIRST */
++
++/* define if the library defines strstream */
++#ifndef CPPUNIT_HAVE_CLASS_STRSTREAM 
++#define CPPUNIT_HAVE_CLASS_STRSTREAM  1 
++#endif
++
++/* Define to 1 if you have the <cmath> header file. */
++#ifndef CPPUNIT_HAVE_CMATH 
++#define CPPUNIT_HAVE_CMATH  1 
++#endif
++
++/* Define if you have the GNU dld library. */
++/* #undef CPPUNIT_HAVE_DLD */
++
++/* Define to 1 if you have the `dlerror' function. */
++#ifndef CPPUNIT_HAVE_DLERROR 
++#define CPPUNIT_HAVE_DLERROR  1 
++#endif
++
++/* Define to 1 if you have the <dlfcn.h> header file. */
++#ifndef CPPUNIT_HAVE_DLFCN_H 
++#define CPPUNIT_HAVE_DLFCN_H  1 
++#endif
++
++/* Define to 1 if you have the `finite' function. */
++#ifndef CPPUNIT_HAVE_FINITE 
++#define CPPUNIT_HAVE_FINITE  1 
++#endif
++
++/* define if the compiler supports GCC C++ ABI name demangling */
++#ifndef CPPUNIT_HAVE_GCC_ABI_DEMANGLE 
++#define CPPUNIT_HAVE_GCC_ABI_DEMANGLE  1 
++#endif
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#ifndef CPPUNIT_HAVE_INTTYPES_H 
++#define CPPUNIT_HAVE_INTTYPES_H  1 
++#endif
++
++/* define if compiler has isfinite */
++#ifndef CPPUNIT_HAVE_ISFINITE 
++#define CPPUNIT_HAVE_ISFINITE  1 
++#endif
++
++/* Define if you have the libdl library or equivalent. */
++#ifndef CPPUNIT_HAVE_LIBDL 
++#define CPPUNIT_HAVE_LIBDL  1 
++#endif
++
++/* Define to 1 if you have the <memory.h> header file. */
++#ifndef CPPUNIT_HAVE_MEMORY_H 
++#define CPPUNIT_HAVE_MEMORY_H  1 
++#endif
++
++/* define to 1 if the compiler implements namespaces */
++#ifndef CPPUNIT_HAVE_NAMESPACES 
++#define CPPUNIT_HAVE_NAMESPACES  1 
++#endif
++
++/* define if the compiler supports Run-Time Type Identification */
++#ifndef CPPUNIT_HAVE_RTTI 
++#define CPPUNIT_HAVE_RTTI  1 
++#endif
++
++/* Define if you have the shl_load function. */
++/* #undef CPPUNIT_HAVE_SHL_LOAD */
++
++/* define if the compiler has stringstream */
++#ifndef CPPUNIT_HAVE_SSTREAM 
++#define CPPUNIT_HAVE_SSTREAM  1 
++#endif
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#ifndef CPPUNIT_HAVE_STDINT_H 
++#define CPPUNIT_HAVE_STDINT_H  1 
++#endif
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#ifndef CPPUNIT_HAVE_STDLIB_H 
++#define CPPUNIT_HAVE_STDLIB_H  1 
++#endif
++
++/* Define to 1 if you have the <strings.h> header file. */
++#ifndef CPPUNIT_HAVE_STRINGS_H 
++#define CPPUNIT_HAVE_STRINGS_H  1 
++#endif
++
++/* Define to 1 if you have the <string.h> header file. */
++#ifndef CPPUNIT_HAVE_STRING_H 
++#define CPPUNIT_HAVE_STRING_H  1 
++#endif
++
++/* Define to 1 if you have the <strstream> header file. */
++#ifndef CPPUNIT_HAVE_STRSTREAM 
++#define CPPUNIT_HAVE_STRSTREAM  1 
++#endif
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#ifndef CPPUNIT_HAVE_SYS_STAT_H 
++#define CPPUNIT_HAVE_SYS_STAT_H  1 
++#endif
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#ifndef CPPUNIT_HAVE_SYS_TYPES_H 
++#define CPPUNIT_HAVE_SYS_TYPES_H  1 
++#endif
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#ifndef CPPUNIT_HAVE_UNISTD_H 
++#define CPPUNIT_HAVE_UNISTD_H  1 
++#endif
++
++/* Define to the sub-directory in which libtool stores uninstalled libraries.
++   */
++#ifndef CPPUNIT_LT_OBJDIR 
++#define CPPUNIT_LT_OBJDIR  ".libs/" 
++#endif
++
++/* Name of package */
++#ifndef CPPUNIT_PACKAGE 
++#define CPPUNIT_PACKAGE  "${CPPUNIT_PACKAGE_NAME}"
++#endif
++
++/* Define to the address where bug reports for this package should be sent. */
++#ifndef CPPUNIT_PACKAGE_BUGREPORT 
++#define CPPUNIT_PACKAGE_BUGREPORT  "" 
++#endif
++
++/* Define to the full name of this package. */
++#ifndef CPPUNIT_PACKAGE_NAME 
++#define CPPUNIT_PACKAGE_NAME  "${CPPUNIT_PACKAGE_NAME}"
++#endif
++
++/* Define to the full name and version of this package. */
++#ifndef CPPUNIT_PACKAGE_STRING 
++#define CPPUNIT_PACKAGE_STRING  "${CPPUNIT_PACKAGE_NAME} ${CPPUNIT_MAJOR_VERSION}.${CPPUNIT_MINOR_VERSION}.${CPPUNIT_PATCH_VERSION}"
++#endif
++
++/* Define to the one symbol short name of this package. */
++#ifndef CPPUNIT_PACKAGE_TARNAME 
++#define CPPUNIT_PACKAGE_TARNAME  "${CPPUNIT_PACKAGE_NAME}"
++#endif
++
++/* Define to the home page for this package. */
++#ifndef CPPUNIT_PACKAGE_URL 
++#define CPPUNIT_PACKAGE_URL  "" 
++#endif
++
++/* Define to the version of this package. */
++#ifndef CPPUNIT_PACKAGE_VERSION 
++#define CPPUNIT_PACKAGE_VERSION  "${CPPUNIT_MAJOR_VERSION}.${CPPUNIT_MINOR_VERSION}.${CPPUNIT_PATCH_VERSION}"
++#endif
++
++/* Define to 1 if you have the ANSI C header files. */
++#ifndef CPPUNIT_STDC_HEADERS 
++#define CPPUNIT_STDC_HEADERS  1 
++#endif
++
++/* Define to 1 to use type_info::name() for class names */
++#ifndef CPPUNIT_USE_TYPEINFO_NAME 
++#define CPPUNIT_USE_TYPEINFO_NAME  CPPUNIT_HAVE_RTTI 
++#endif
++
++/* Version number of package */
++#ifndef CPPUNIT_VERSION 
++#define CPPUNIT_VERSION  "${CPPUNIT_MAJOR_VERSION}.${CPPUNIT_MINOR_VERSION}.${CPPUNIT_PATCH_VERSION}"
++#endif
++ 
++/* _INCLUDE_CPPUNIT_CONFIG_AUTO_H */
++#endif
+\ No newline at end of file
+diff --git a/cppunitConfig.cmake.in b/cppunitConfig.cmake.in
+new file mode 100644
+index 0000000..391a202
+--- /dev/null
++++ b/cppunitConfig.cmake.in
+@@ -0,0 +1,4 @@
++@PACKAGE_INIT@
++
++get_filename_component(SELF_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
++include(${SELF_DIR}/cppunit-targets.cmake)
+-- 
+2.44.0.windows.1
+

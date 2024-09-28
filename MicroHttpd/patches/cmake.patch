@@ -1,0 +1,2711 @@
+From a37bd6a3325b2f329d8ec13a172502ad90f646d7 Mon Sep 17 00:00:00 2001
+From: Alex Fuller <alex.fuller@flyingbark.com.au>
+Date: Wed, 31 Jul 2024 12:37:10 +1000
+Subject: [PATCH] CMake
+
+---
+ CMakeLists.txt                       | 1045 ++++++++++++++++++++++++++
+ MHD_config_cmake.h.in                |  558 ++++++++++++++
+ cmake/DetermineFork.cmake            |   64 ++
+ cmake/DetermineStdCHeaders.cmake     |   50 ++
+ cmake/DetermineSystemExtension.cmake |  415 ++++++++++
+ cmake/DetermineTargetEndianess.cmake |   98 +++
+ cmake/FindLibGCrypt.cmake            |   93 +++
+ cmake/FindLibMagic.cmake             |   76 ++
+ cmake/FindNSS.cmake                  |   39 +
+ src/microhttpd/CMakeLists.txt        |  175 +++++
+ 10 files changed, 2613 insertions(+)
+ create mode 100644 CMakeLists.txt
+ create mode 100644 MHD_config_cmake.h.in
+ create mode 100644 cmake/DetermineFork.cmake
+ create mode 100644 cmake/DetermineStdCHeaders.cmake
+ create mode 100644 cmake/DetermineSystemExtension.cmake
+ create mode 100644 cmake/DetermineTargetEndianess.cmake
+ create mode 100644 cmake/FindLibGCrypt.cmake
+ create mode 100644 cmake/FindLibMagic.cmake
+ create mode 100644 cmake/FindNSS.cmake
+ create mode 100644 src/microhttpd/CMakeLists.txt
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+index 00000000..ecc03313
+--- /dev/null
++++ b/CMakeLists.txt
+@@ -0,0 +1,1045 @@
++#
++# Cmake instructions file
++#
++cmake_minimum_required(VERSION 3.1)
++
++list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR})
++
++include(CheckSymbolExists)
++include(CheckIncludeFiles)
++include(CheckCSourceCompiles)
++include(CheckStructHasMember)
++include(CheckFunctionExists)
++include(CheckCCompilerFlag)
++include(CheckCSourceRuns)
++include(cmake/DetermineSystemExtension)
++include(cmake/FindLibGCrypt)
++include(cmake/FindNSS)
++include(cmake/DetermineTargetEndianess)
++include(cmake/DetermineStdCHeaders)
++
++set(major 0)
++set(minor 9)
++set(micro 71)
++
++project(libmicrohttpd LANGUAGES C VERSION ${major}.${minor}.${micro})
++
++set(ENABLE_BAUTH          yes     CACHE BOOL "Enable basic Auth support")
++set(ENABLE_DAUTH          yes     CACHE BOOL "Enable digest Auth support")
++set(ENABLE_EPOLL          yes     CACHE BOOL "Enable epoll")
++set(ENABLE_POLL           yes     CACHE BOOL "Enable poll")
++set(ENABLE_ERROR_MSGS     yes     CACHE BOOL "Enable support for error messages")
++set(ENABLE_POSTPROCESSOR  yes     CACHE BOOL "Enable postprocessor support")
++set(ENABLE_HTTPS          yes     CACHE BOOL "Enable HTTPS support")
++set(DISABLE_THREAD_NAMES  no      CACHE BOOL "Disable setting name on generated threads")
++set(ENABLE_UPGRADE        yes     CACHE BOOL "Enable Upgrade support")
++set(MHD_ITC               auto    CACHE STRING "For inter process communication choose one of pipe, socketpair, eventfd, auto")
++set(ENABLE_TESTS          yes     CACHE BOOL "Enable tests build")
++set(ENABLE_EXAMPLES       yes     CACHE BOOL "Enable examples build")
++set(ENABLE_DOC            yes     CACHE BOOL "Enable documentation build")
++
++if ("FreeBSD" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    set(FREEBSD 1)
++elseif ("Linux" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    list(APPEND CMAKE_REQUIRED_LIBRARIES -lrt)
++    set(LINUX 1)
++elseif ("NetBSD" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    set(NETBSD 1)
++elseif ("OpenBSD" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    set(OPENBSD 1)
++elseif ("Darwin" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    set(OSX 1)
++elseif ("SunOS" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -D_REENTRANT)
++    set(SOLARIS 1)
++elseif ("BSD/OS" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    set(SOMEBSD 1)
++elseif ("Windows" STREQUAL "${CMAKE_SYSTEM_NAME}")
++    set(WINDOWS 1)
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -D_CRT_SECURE_NO_DEPRECATE)
++    list(APPEND CMAKE_REQUIRED_LIBRARIES Ws2_32.lib odbc32.lib odbccp32.lib)
++else()
++    set(OTHEROS 1)
++endif()
++
++determine_system_extension()
++list(APPEND CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines})
++determine_target_endianness(endianness)
++
++if ("big" STREQUAL "${endianness}")
++    set(WORDS_BIGENDIAN 1)
++endif()
++
++if (ENABLE_BAUTH)
++    set(BAUTH_SUPPORT 1)
++endif()
++if (ENABLE_DAUTH)
++    set(DAUTH_SUPPORT 1)
++endif()
++if (ENABLE_ERROR_MSGS)
++    set(HAVE_MESSAGES 1)
++endif()
++if (ENABLE_POSTPROCESSOR)
++    set(HAVE_POSTPROCESSOR 1)
++endif()
++if (ENABLE_UPGRADE)
++    set(UPGRADE_SUPPORT 1)
++endif()
++
++if (ENABLE_HTTPS)
++    set(HTTPS_SUPPORT 1)
++    set(MSG_HTTPS yes)
++    FindLibGCrypt()
++    include(FindGnuTLS)
++    set(HttpsMissingLibraries "")
++    if (NOT GNUTLS_FOUND)
++        list(APPEND HttpsMissingLibraries libgnutls)
++    endif()
++    if (NOT LIBGCRYPT_FOUND)
++        list(APPEND HttpsMissingLibraries libgcrypt)
++    endif()
++
++    if (NOT "" STREQUAL "${HttpsMissingLibraries}")
++        set(HTTPS_SUPPORT 0)
++        set(MSG_HTTPS "no (lacking ${HttpsMissingLibraries})")
++    endif()
++else()
++    set(MSG_HTTPS "no (disabled)")
++endif()
++
++if (ENABLE_EPOLL)
++    set(MSG_EPOLL yes)
++    check_symbol_exists(epoll_create "sys/epoll.h" EPOLL_SUPPORT)
++    check_symbol_exists(epoll_create1 "sys/epoll.h" HAVE_EPOLL_CREATE1)
++    if (NOT EPOLL_SUPPORT)
++        set(MSG_EPOLL "no (platform does not support epoll)")
++    endif()
++else()
++    set(MSG_EPOLL "no (disabled)")
++endif()
++
++if (ENABLE_POLL)
++    set(MSG_POLL yes)
++    if (WINDOWS)
++        check_c_source_compiles("
++            #include <winsock2.h>
++
++            int main(int argc, char** argv)
++            {
++                WSAPOLLFD fda[2];
++                WSAPoll(fda, 2, 0);
++
++              return 0;
++            }
++            " HAVE_POLL
++        )
++    else()
++        check_symbol_exists(poll "poll.h" HAVE_POLL)
++        check_include_files(poll.h HAVE_POLL_H)
++    endif()
++
++    if (NOT HAVE_POLL)
++        set(MSG_POLL "no (platform does not support poll)")
++    endif()
++else()
++    set(MSG_POLL "no (disabled)")
++endif()
++
++if(APPLE AND CMAKE_OSX_ARCHITECTURES)
++    # I am not sure if this mean AC_APPLE_UNIVERSAL_BUILD
++    set (AC_APPLE_UNIVERSAL_BUILD 1)
++endif()
++
++check_include_files(stdio.h HAVE_STDIO_H)
++check_include_files(stdlib.h HAVE_STDLIB_H)
++check_include_files(string.h HAVE_STRING_H)
++check_include_files(strings.h HAVE_STRINGS_H)
++check_include_files(stdint.h HAVE_STDINT_H)
++check_include_files(time.h HAVE_TIME_H)
++check_include_files(sys/types.h HAVE_SYS_TYPES_H)
++check_include_files(unistd.h HAVE_UNISTD_H)
++check_include_files(wchar.h HAVE_WCHAR_H)
++check_include_files(fcntl.h HAVE_FCNTL_H)
++
++check_function_exists(accept4 HAVE_ACCEPT4)
++check_include_files(arpa/inet.h HAVE_ARPA_INET_H)
++if (WINDOWS)
++    list(APPEND CMAKE_REQUIRED_FLAGS /WX)
++endif()
++check_c_source_compiles("
++    #define __STDC_WANT_LIB_EXT1__ 1
++    #include <time.h>
++    int main(int argc, char** argv)
++    {
++      struct tm res;
++      time_t t;
++      gmtime_s (&t, &res);
++
++      return 0;
++    }
++    " HAVE_C11_GMTIME_S
++)
++if (NOT HAVE_C11_GMTIME_S)
++check_c_source_compiles("
++    #include <time.h>
++    int main(int argc, char** argv)
++    {
++      struct tm res;
++      time_t t;
++      gmtime_s (&res, &t);
++
++      return 0;
++    }
++    " HAVE_W32_GMTIME_S
++)
++endif()
++if (WINDOWS)
++    list(REMOVE_ITEM CMAKE_REQUIRED_FLAGS /WX)
++endif()
++check_symbol_exists(calloc stdlib.h HAVE_CALLOC)
++check_symbol_exists(clock_gettime time.h HAVE_CLOCK_GETTIME)
++check_symbol_exists(clock_get_time mach/clock.h;mach/mach.h MACH_clock_get_time)
++check_symbol_exists(mach_port_deallocate mach/clock.h;mach/mach.h MACH_mach_port_deallocate)
++check_symbol_exists(host_get_clock_service mach/clock.h;mach/mach.h MACH_host_get_clock_service)
++if (MACH_clock_get_time AND MACH_mach_port_deallocate AND MACH_host_get_clock_service)
++    set(HAVE_CLOCK_GET_TIME 1)
++endif()
++check_symbol_exists(SOCK_NONBLOCK sys/socket.h HAVE_DECL_SOCK_NONBLOCK)
++if (HAVE_DECL_SOCK_NONBLOCK)
++    set(HAVE_SOCK_NONBLOCK 1)
++endif()
++check_include_files(stddef.h HAVE_STDDEF_H)
++check_include_files(dlfcn.h HAVE_DLFCN_H)
++check_include_files(endian.h HAVE_ENDIAN_H)
++check_include_files(errno.h HAVE_ERRNO_H)
++check_symbol_exists(fork "unistd.h" HAVE_FORK)
++check_symbol_exists(fseeko "stdio.h" HAVE_FSEEKO)
++check_include_files(gcrypt.h HAVE_GCRYPT_H)
++check_symbol_exists(gethrtime "sys/time.h" HAVE_GETHRTIME)
++check_symbol_exists(gettimeofday "sys/time.h" HAVE_GETTIMEOFDAY)
++check_symbol_exists(gmtime_r "time.h" HAVE_GMTIME_R)
++check_include_files(gnutls/gnutls.h HAVE_GNUTLS_GNUTLS_H)
++check_include_files(inetLib.h HAVE_INETLIB_H)
++check_include_files(inttypes.h HAVE_INTTYPES_H)
++check_include_files(limits.h HAVE_LIMITS_H)
++check_include_files(locale.h HAVE_LOCALE_H)
++check_symbol_exists(lseek64 "sys/types.h;unistd.h" HAVE_LSEEK64)
++check_include_files(machine/endian.h HAVE_MACHINE_ENDIAN_H)
++check_include_files(machine/param.h HAVE_MACHINE_PARAM_H)
++check_include_files(magic.h HAVE_MAGIC_H)
++check_include_files(math.h HAVE_MATH_H)
++check_symbol_exists(memmem "string.h" HAVE_MEMMEM)
++check_include_files(memory.h HAVE_MEMORY_H)
++check_symbol_exists(nanosleep "time.h" HAVE_NANOSLEEP)
++check_include_files(netdb.h HAVE_NETDB_H)
++check_include_files(netinet/in.h HAVE_NETINET_IN_H)
++check_include_files(netinet/ip.h HAVE_NETINET_IP_H)
++check_include_files(netinet/tcp.h HAVE_NETINET_TCP_H)
++check_include_files(net/if.h HAVE_NET_IF_H)
++set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++if(HAVE_FCNTL_H)
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_FCNTL_H)
++endif()
++if(HAVE_UNISTD_H)
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_UNISTD_H)
++endif()
++check_c_source_compiles("
++    #ifdef HAVE_FCNTL_H
++    #include <fcntl.h>
++    #endif
++    #ifdef HAVE_UNISTD_H
++    #include <unistd.h>
++    #endif
++
++    int main(int argc, char** argv)
++    {
++        int arr[2];
++        int res;
++        res = pipe2(arr, O_CLOEXEC | O_NONBLOCK);
++
++        return 0;
++    }
++    " HAVE_PIPE2_FUNC
++)
++set(CMAKE_REQUIRED_DEFINITIONS ${old_CMAKE_REQUIRED_DEFINITIONS})
++check_symbol_exists(pipe "unistd.h" HAVE_PIPE_FUNC)
++check_symbol_exists(socketpair "sys/socket.h" HAVE_SOCKETPAIR_FUNC)
++check_symbol_exists(pread "unistd.h" HAVE_PREAD)
++check_symbol_exists(pread64 "unistd.h" HAVE_PREAD64)
++check_include_files(pthread.h HAVE_PTHREAD_H)
++check_include_files(pthread_np.h HAVE_PTHREAD_NP_H)
++set(USE_THREADS "unknown threads")
++if (HAVE_PTHREAD_H)
++    set(MHD_USE_POSIX_THREADS 1)
++    set(USE_THREADS posix)
++else()
++    check_symbol_exists(CreateThread "Windows.h" MHD_USE_W32_THREADS)
++    if (MHD_USE_W32_THREADS)
++        set(USE_THREADS w32)
++    endif()
++endif()
++
++if (DISABLE_THREAD_NAMES)
++    set(MHD_NO_THREAD_NAMES 1)
++    set(MSG_THREAD_NAMES "no (disbaled)")
++else()
++    set(MSG_THREAD_NAMES "yes")
++endif()
++if (NOT HAVE_PTHREAD_H AND NOT DISABLE_THREAD_NAMES)
++    set(MHD_NO_THREAD_NAMES 1)
++    set(MSG_THREAD_NAMES "no (not supported by platform)")
++elseif (HAVE_PTHREAD_H AND NOT DISABLE_THREAD_NAMES)
++    set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    if(HAVE_PTHREAD_NP_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_PTHREAD_NP_H)
++    endif()
++    check_c_source_compiles("
++        #include <pthread.h>
++        #ifdef HAVE_PTHREAD_NP_H
++        #include <pthread_np.h>
++        #endif
++
++        int main(int argc, char** argv)
++        {
++            pthread_attr_t thr_attr;
++            pthread_attr_init(&thr_attr);
++            pthread_attr_setname_np(&thr_attr, \"name\", 0);
++            pthread_attr_destroy(&thr_attr);
++
++            return 0;
++        }
++        " HAVE_PTHREAD_ATTR_SETNAME_NP_NETBSD
++    )
++    check_c_source_compiles("
++        #include <pthread.h>
++        #ifdef HAVE_PTHREAD_NP_H
++        #include <pthread_np.h>
++        #endif
++
++        int main(int argc, char** argv)
++        {
++            pthread_attr_t thr_attr;
++            pthread_attr_init(&thr_attr);
++            pthread_attr_setname_np(&thr_attr, \"name\");
++            pthread_attr_destroy(&thr_attr);
++
++            return 0;
++        }
++        " HAVE_PTHREAD_ATTR_SETNAME_NP_IBMI
++    )
++
++    check_c_source_compiles("
++        #include <pthread.h>
++        #ifdef HAVE_PTHREAD_NP_H
++        #include <pthread_np.h>
++        #endif
++
++        int main(int argc, char** argv)
++        {
++            int res = pthread_setname_np(pthread_self(), \"name\", 0);
++
++            return 0;
++        }
++        " HAVE_PTHREAD_SETNAME_NP_NETBSD
++    )
++    check_c_source_compiles("
++        #include <pthread.h>
++        #ifdef HAVE_PTHREAD_NP_H
++        #include <pthread_np.h>
++        #endif
++
++        int main(int argc, char** argv)
++        {
++            int res = pthread_setname_np(pthread_self(), \"name\");
++
++            return 0;
++        }
++        " HAVE_PTHREAD_SETNAME_NP_GNU
++    )
++    check_c_source_compiles("
++        #include <pthread.h>
++        #ifdef HAVE_PTHREAD_NP_H
++        #include <pthread_np.h>
++        #endif
++
++        int main(int argc, char** argv)
++        {
++            int res = pthread_setname_np(\"name\");
++
++            return 0;
++        }
++        " HAVE_PTHREAD_SETNAME_NP_DARWIN
++    )
++    check_c_source_compiles("
++        #include <pthread.h>
++        #ifdef HAVE_PTHREAD_NP_H
++        #include <pthread_np.h>
++        #endif
++
++        int main(int argc, char** argv)
++        {
++            pthread_set_name_np(pthread_self(), \"name\");
++
++            return 0;
++        }
++        " HAVE_PTHREAD_SET_NAME_NP_FREEBSD
++    )
++
++    if (NOT (HAVE_PTHREAD_ATTR_SETNAME_NP_NETBSD OR HAVE_PTHREAD_ATTR_SETNAME_NP_IBMI OR HAVE_PTHREAD_SETNAME_NP_GNU OR HAVE_PTHREAD_SET_NAME_NP_FREEBSD OR HAVE_PTHREAD_SETNAME_NP_DARWIN OR HAVE_PTHREAD_SETNAME_NP_NETBSD))
++        # thread names not supported by platform
++        set(MHD_NO_THREAD_NAMES 1)
++        set(MSG_THREAD_NAMES "no (not supported by platform)")
++    else()
++        set(MSG_THREAD_NAMES "yes")
++    endif()
++
++    set(CMAKE_REQUIRED_DEFINITIONS ${old_CMAKE_REQUIRED_DEFINITIONS})
++endif()
++
++check_c_source_compiles("
++#include <pthread.h>
++int main(int argc, char** argv)
++{
++  static int i = PTHREAD_PRIO_INHERIT;
++  return 0;
++}
++" HAVE_PTHREAD_PRIO_INHERIT)
++
++check_symbol_exists(rand "stdlib.h" HAVE_RAND)
++check_function_exists(random HAVE_RANDOM)
++check_symbol_exists(tsearch "search.h" HAVE_TSEARCH)
++check_symbol_exists(tfind "search.h" HAVE_tfind)
++check_symbol_exists(tdelete "search.h" HAVE_tdelete)
++if (HAVE_TSEARCH AND HAVE_tfind AND HAVE_tdelete)
++    set(HAVE_SEARCH_H 1)
++endif()
++
++check_symbol_exists(sendfile64 "sys/sendfile.h" HAVE_SENDFILE64)
++check_symbol_exists(snprintf "stdio.h" HAVE_SNPRINTF)
++check_struct_has_member("struct sockaddr_in" sin_len netinet/in.h HAVE_SOCKADDR_IN_SIN_LEN)
++check_include_files(sockLib.h HAVE_SOCKLIB_H)
++check_c_source_compiles("
++#include <stdbool.h>
++int main(int argc, char** argv)
++{
++  static bool b;
++  return 0;
++}
++" HAVE_STDBOOL_H)
++if (NOT HAVE_STDBOOL_H)
++    set(bool "int")
++    set(false "(0)")
++    set(true "(!0)")
++else()
++    set(HAVE_REAL_BOOL 1)
++endif()
++
++check_include_files(sys/byteorder.h HAVE_SYS_BYTEORDER_H)
++check_include_files(sys/endian.h HAVE_SYS_ENDIAN_H)
++check_include_files(sys/eventfd.h HAVE_SYS_EVENTFD_H)
++check_symbol_exists(eventfd "sys/eventfd.h" HAVE_EVENTFD_FUNCTION)
++check_include_files(sys/ioctl.h HAVE_SYS_IOCTL_H)
++check_include_files(sys/isa_defs.h HAVE_SYS_ISA_DEFS_H)
++check_include_files(sys/machine.h HAVE_SYS_MACHINE_H)
++check_include_files(sys/mman.h HAVE_SYS_MMAN_H)
++check_include_files(sys/msg.h HAVE_SYS_MSG_H)
++check_include_files(sys/param.h HAVE_SYS_PARAM_H)
++check_include_files(sys/select.h HAVE_SYS_SELECT_H)
++check_include_files(sys/socket.h HAVE_SYS_SOCKET_H)
++check_include_files(sys/stat.h HAVE_SYS_STAT_H)
++check_include_files(sys/time.h HAVE_SYS_TIME_H)
++check_symbol_exists(usleep "unistd.h" HAVE_USLEEP)
++check_symbol_exists(waitpid "sys/wait.h" HAVE_WAITPID)
++check_include_files(winsock2.h HAVE_WINSOCK2_H)
++check_include_files(ws2tcpip.h HAVE_WS2TCPIP_H)
++
++check_c_compiler_flag(-Werror=attributes HAVE_OPTION_ERROR_ON_ATTRIBUTES)
++set(PossibleInlines "")
++if (HAVE_OPTION_ERROR_ON_ATTRIBUTES)
++    list(APPEND PossibleInlines "inline __attribute__((always_inline))")
++endif()
++list(APPEND PossibleInlines __forceinline inline __inline__ __inline _inline _Inline)
++foreach(PossibleInline ${PossibleInlines})
++    check_c_source_compiles("
++        static ${PossibleInline} int sumfn(int x, int y)
++            { return x + y; }
++
++        int main(int argc, char** argv)
++            {
++            int i = sumfn(1,2);
++            return 0;
++            }"
++        HAVE_INLINE)
++    if (HAVE_INLINE)
++        set(INLINE_FUNC 1)
++        set(_MHD_inline "static ${PossibleInline}")
++        break()
++    endif()
++endforeach()
++if (CMAKE_COMPILER_IS_GNUCC AND CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.2")
++    check_c_compiler_flag(-fvisibility=hidden HAVE_OPTION_VISIBILITY)
++endif()
++if(HAVE_OPTION_VISIBILITY)
++    set(_MHD_EXTERN "__attribute__((visibility(\"default\"))) extern")
++elseif(WINDOWS)
++    set(_MHD_EXTERN "__declspec(dllexport) extern")
++endif()
++
++include(FindCURL)
++if (CURL_FOUND)
++    set(MSG_CURL "yes")
++    set(MHD_REQ_CURL_VERSION "${CURL_VERSION_STRING}")
++    include(FindOpenSSL)
++    set(MHD_REQ_CURL_OPENSSL_VERSION "${OPENSSL_VERSION}")
++    include(FindGnuTLS)
++    set(MHD_REQ_CURL_GNUTLS_VERSION "${GNUTLS_VERSION_STRING}")
++    FindNSS()
++    set(MHD_REQ_CURL_NSS_VERSION "${NSS_VERSION}")
++
++    set(MHD_REQ_CURL_VERSION "7.16.4") # required cURL version to run tests
++    set(MHD_REQ_CURL_OPENSSL_VERSION "0.9.8") # required cURL SSL version to run tests
++    set(MHD_REQ_CURL_GNUTLS_VERSION "2.8.6") # gnuTLS lib version - used in conjunction with cURL
++    set(MHD_REQ_CURL_NSS_VERSION "3.12.0") # NSS lib version - used in conjunction with cURL
++
++    set(HAVE_LIBCURL 1)
++    find_program(CURL_CONFIG curl-config)
++    if (CURL_CONFIG)
++        execute_process(COMMAND ${CURL_CONFIG} --features OUTPUT_VARIABLE  cfs OUTPUT_STRIP_TRAILING_WHITESPACE)
++        string(REGEX  REPLACE "\n\r?" ";" cfs "${cfs}")
++        foreach(cf ${cfs})
++            string(TOUPPER "${cf}" cf)
++            set(LIBCURL_FEATURE_${cf} 1)
++        endforeach()
++        execute_process(COMMAND ${CURL_CONFIG} --protocols OUTPUT_VARIABLE  ps OUTPUT_STRIP_TRAILING_WHITESPACE)
++        string(REGEX  REPLACE "\n\r?" ";" ps "${ps}")
++        foreach(p ${ps})
++            string(TOUPPER "${p}" p)
++            set(LIBCURL_PROTOCOL_${p} 1)
++        endforeach()
++    endif()
++else()
++    set(MSG_CURL "no, many unit tests will not run")
++endif()
++
++set(PACKAGE "${PROJECT_NAME}")
++set(PACKAGE_BUGREPORT "libmicrohttpd@gnu.org")
++set(PACKAGE_NAME "GNU Libmicrohttpd")
++set(PACKAGE_STRING "GNU Libmicrohttpd ${PROJECT_VERSION}")
++set(PACKAGE_TARNAME "libmicrohttpd")
++set(PACKAGE_URL "http://www.gnu.org/software/libmicrohttpd/")
++set(PACKAGE_VERSION "${PROJECT_VERSION}")
++set(PACKAGE_VERSION_MAJOR ${major})
++set(PACKAGE_VERSION_MINOR ${minor})
++set(PACKAGE_VERSION_SUBMINOR ${micro})
++set(VERSION "${PROJECT_VERSION}")
++
++determine_std_c_headers(STDC_HEADERS)
++
++set(AvailableInterPorcessCommunication "")
++if (WINDOWS)
++    list(APPEND AvailableInterPorcessCommunication socketpair)
++else()
++    if (HAVE_SYS_EVENTFD_H AND HAVE_EVENTFD_FUNCTION)
++        list(APPEND AvailableInterPorcessCommunication eventfd)
++    endif()
++    if (HAVE_PIPE2_FUNC OR HAVE_PIPE_FUNC)
++        list(APPEND AvailableInterPorcessCommunication pipe)
++    endif()
++    if (HAVE_SOCKETPAIR_FUNC)
++        list(APPEND AvailableInterPorcessCommunication socketpair)
++    endif()
++endif()
++if ("" STREQUAL "${AvailableInterPorcessCommunication}")
++    message(FATAL_ERROR "cannot find useable type of inter-thread communication")
++endif()
++
++if ("auto" STREQUAL "${MHD_ITC}")
++    list(GET AvailableInterPorcessCommunication 0 MHD_ITC)
++else()
++    list(FIND AvailableInterPorcessCommunication "${MHD_ITC}" ITC_INDEX)
++    if (ITC_INDEX GREATER -1)
++        # it is already correctly set
++    else()
++        message(FATAL_ERROR "Requested ${MHD_ITC} inter-thread communication is not available (try auto). Available are [${AvailableInterPorcessCommunication}].")
++    endif()
++endif()
++
++if("pipe" STREQUAL "${MHD_ITC}")
++    set(_MHD_ITC_PIPE 1)
++elseif("eventfd" STREQUAL "${MHD_ITC}")
++    set(_MHD_ITC_EVENTFD 1)
++elseif("socketpair" STREQUAL "${MHD_ITC}")
++    set(_MHD_ITC_SOCKETPAIR 1)
++else()
++    message(FATAL_ERROR "Cannot find useable type of inter-thread communication. Available are [${AvailableInterPorcessCommunication}].")
++endif()
++
++if (LINUX)
++    set(HAVE_LISTEN_SHUTDOWN 1)
++elseif(CYGWIN OR MINGW OR WINDOWS)
++    set(HAVE_LISTEN_SHUTDOWN 0)
++else()
++    # we must check it
++    set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    if(HAVE_UNISTD_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_UNISTD_H)
++    endif()
++    if(HAVE_TIME_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_TIME_H)
++    endif()
++    if(HAVE_STRING_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_STRING_H)
++    endif()
++    if(HAVE_SYS_TYPES_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_SYS_TYPES_H)
++    endif()
++    if(HAVE_SYS_SOCKET_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_SYS_SOCKET_H)
++    endif()
++    if(HAVE_NETINET_IN_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_NETINET_IN_H)
++    endif()
++    if(HAVE_SYS_SELECT_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_SYS_SELECT_H)
++    endif()
++    if(HAVE_NETINET_TCP_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_NETINET_TCP_H)
++    endif()
++    if(HAVE_GETTIMEOFDAY)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_GETTIMEOFDAY)
++    endif()
++    if(HAVE_NANOSLEEP)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_NANOSLEEP)
++    endif()
++    if(HAVE_USLEEP)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_USLEEP)
++    endif()
++
++    check_c_source_runs([=[
++        #include <stdlib.h>
++
++        #ifdef HAVE_UNISTD_H
++        #  include <unistd.h>
++        #endif
++        #ifdef HAVE_TIME_H
++        #  include <time.h>
++        #endif
++        #ifdef HAVE_STRING_H
++        #  include <string.h>
++        #endif
++
++        #if !defined(_WIN32) || defined(__CYGWIN__)
++        #  ifdef HAVE_SYS_TYPES_H
++        #    include <sys/types.h>
++        #  endif
++        #  ifdef HAVE_SYS_SOCKET_H
++        #    include <sys/socket.h>
++        #  endif
++        #  ifdef HAVE_NETINET_IN_H
++        #    include <netinet/in.h>
++        #  endif
++        #  ifdef HAVE_SYS_TIME_H
++        #    include <sys/time.h>
++        #  endif
++        #  ifdef HAVE_SYS_SELECT_H
++        #    include <sys/select.h>
++        #  endif
++        #  ifdef HAVE_NETINET_TCP_H
++        #    include <netinet/tcp.h>
++        #  endif
++           typedef int MHD_socket;
++        #  define MHD_INVALID_SOCKET (-1)
++        #  define MHD_POSIX_SOCKETS 1
++        #else
++        #  include <winsock2.h>
++        #  include <ws2tcpip.h>
++        #  include <windows.h>
++           typedef SOCKET MHD_socket;
++        #  define MHD_INVALID_SOCKET (INVALID_SOCKET)
++        #  define MHD_WINSOCK_SOCKETS 1
++        #endif
++
++        #include <pthread.h>
++
++           #ifndef SHUT_RD
++        #  define SHUT_RD 0
++        #endif
++        #ifndef SHUT_WR
++        #  define SHUT_WR 1
++        #endif
++        #ifndef SHUT_RDWR
++        #  define SHUT_RDWR 2
++        #endif
++
++        #ifndef NULL
++        #  define NULL ((void*)0)
++        #endif
++
++        #ifdef HAVE_GETTIMEOFDAY
++        #  if defined(_WIN32) && !defined(__CYGWIN__)
++        #    undef HAVE_GETTIMEOFDAY
++        #  endif
++        #endif
++
++
++        #ifdef HAVE_NANOSLEEP
++        static const struct timespec sm_tmout = {0, 1000};
++        #  define short_sleep() nanosleep(&sm_tmout, NULL)
++        #elif defined(HAVE_USLEEP)
++        #  define short_sleep() usleep(1)
++        #else
++        #  define short_sleep() (void)0
++        #endif
++
++        static volatile int going_select = 0;
++        static volatile int select_ends = 0;
++        static volatile int gerror = 0;
++        static int timeout_mils;
++
++        #ifndef HAVE_GETTIMEOFDAY
++        static volatile long long select_elapsed_time = 0;
++
++        static long long time_chk(void)
++        {
++          long long ret = time(NULL);
++          if (-1 == ret)
++            gerror = 4;
++          return ret;
++        }
++        #endif
++
++
++        static void* select_thrd_func(void* param)
++        {
++        #ifndef HAVE_GETTIMEOFDAY
++          long long start, stop;
++        #endif
++          fd_set rs;
++          struct timeval tmot = {0, 0};
++          MHD_socket fd = *((MHD_socket*)param);
++
++          FD_ZERO(&rs);
++          FD_SET(fd, &rs);
++          tmot.tv_usec = timeout_mils * 1000;
++        #ifndef HAVE_GETTIMEOFDAY
++          start = time_chk();
++        #endif
++          going_select = 1;
++          if (0 > select ((int)(fd) + 1, &rs, NULL, NULL, &tmot))
++            gerror = 5;
++        #ifndef HAVE_GETTIMEOFDAY
++          stop = time_chk();
++          select_elapsed_time = stop - start;
++        #endif
++          select_ends = 1;
++          return NULL;
++        }
++
++
++        static MHD_socket create_socket(void)
++        { return socket (AF_INET, SOCK_STREAM, 0); }
++
++        static void close_socket(MHD_socket fd)
++        {
++        #ifdef MHD_POSIX_SOCKETS
++          close(fd);
++        #else
++          closesocket(fd);
++        #endif
++        }
++
++        static MHD_socket
++        create_socket_listen(int port)
++        {
++          MHD_socket fd;
++          struct sockaddr_in sock_addr;
++          fd = create_socket();
++          if (MHD_INVALID_SOCKET == fd)
++            return fd;
++
++          memset (&sock_addr, 0, sizeof (struct sockaddr_in));
++          sock_addr.sin_family = AF_INET;
++          sock_addr.sin_port = htons(port);
++          sock_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++
++          if (bind (fd, (const struct sockaddr*) &sock_addr, sizeof(sock_addr)) < 0 ||
++              listen(fd, SOMAXCONN) < 0)
++            {
++              close_socket(fd);
++              return MHD_INVALID_SOCKET;
++            }
++          return fd;
++        }
++
++        #ifdef HAVE_GETTIMEOFDAY
++        #define diff_time(tv1, tv2) ((long long)(tv1.tv_sec-tv2.tv_sec)*10000 + (long long)(tv1.tv_usec-tv2.tv_usec)/100)
++        #else
++        #define diff_time(tv1, tv2) ((long long)(tv1-tv2))
++        #endif
++
++        static long long test_run_select(int timeout_millsec, int use_shutdown, long long delay_before_shutdown)
++        {
++          pthread_t select_thrd;
++          MHD_socket fd;
++        #ifdef HAVE_GETTIMEOFDAY
++          struct timeval start, stop;
++        #else
++          long long start;
++        #endif
++
++          fd = create_socket_listen(0);
++          if (MHD_INVALID_SOCKET == fd)
++            return -7;
++          going_select = 0;
++          select_ends = 0;
++          gerror = 0;
++          timeout_mils = timeout_millsec;
++          if (0 != pthread_create (&select_thrd, NULL, select_thrd_func, (void*)&fd))
++            return -8;
++          while (!going_select) {short_sleep();}
++        #ifdef HAVE_GETTIMEOFDAY
++          gettimeofday (&start, NULL);
++        #else
++          start = time_chk();
++        #endif
++          if (use_shutdown)
++            {
++        #ifdef HAVE_GETTIMEOFDAY
++              struct timeval current;
++              do {short_sleep(); gettimeofday(&current, NULL); } while (delay_before_shutdown > diff_time(current, start));
++        #else
++              while (delay_before_shutdown > time_chk() - start) {short_sleep();}
++        #endif
++              shutdown(fd, SHUT_RDWR);
++            }
++        #ifdef HAVE_GETTIMEOFDAY
++          while (!select_ends) {short_sleep();}
++          gettimeofday (&stop, NULL);
++        #endif
++          if (0 != pthread_join(select_thrd, NULL))
++            return -9;
++          close_socket(fd);
++          if (gerror)
++            return -10;
++        #ifdef HAVE_GETTIMEOFDAY
++          return (long long)diff_time(stop, start);
++        #else
++          return select_elapsed_time;
++        #endif
++        }
++
++        static int test_it(void)
++        {
++          long long duration2;
++        #ifdef HAVE_GETTIMEOFDAY
++          long long duration0, duration1;
++          duration0 = test_run_select(0, 0, 0);
++          if (0 > duration0)
++            return -duration0;
++
++          duration1 = test_run_select(50, 0, 0);
++          if (0 > duration1)
++            return -duration1 + 20;
++
++          duration2 = test_run_select(500, 1, (duration0 + duration1) / 2);
++          if (0 > duration2)
++            return -duration2 + 40;
++
++          if (duration1 * 2 > duration2)
++            { /* Check second time to be sure. */
++              duration2 = test_run_select(500, 1, (duration0 + duration1) / 2);
++              if (0 > duration2)
++                return -duration2 + 60;
++              if (duration1 * 2 > duration2)
++                return 0;
++            }
++        #else
++          duration2 = test_run_select(5000, 1, 2);
++          if (0 > duration2)
++            return -duration2 + 80;
++
++          if (4 > duration2)
++            { /* Check second time to be sure. */
++              duration2 = test_run_select(5000, 1, 2);
++              if (0 > duration2)
++              return -duration2 + 100;
++              if (4 > duration2)
++                return 0;
++            }
++        #endif
++          return 1;
++        }
++
++
++        static int init(void)
++        {
++        #ifdef MHD_WINSOCK_SOCKETS
++          WSADATA wsa_data;
++
++          if (0 != WSAStartup(MAKEWORD(2, 2), &wsa_data) || MAKEWORD(2, 2) != wsa_data.wVersion)
++            {
++              WSACleanup();
++              return 0;
++            }
++        #endif /* MHD_WINSOCK_SOCKETS */
++          return 1;
++        }
++
++        static void cleanup(void)
++        {
++        #ifdef MHD_WINSOCK_SOCKETS
++          WSACleanup();
++        #endif /* MHD_WINSOCK_SOCKETS */
++        }
++
++        int main(void)
++        {
++          int res;
++          if (!init())
++            return 19;
++
++          res = test_it();
++
++          cleanup();
++          if (gerror)
++            return gerror;
++
++          return res;
++        }
++        ]=] HAVE_LISTEN_SHUTDOWN)
++
++        set(CMAKE_REQUIRED_DEFINITIONS ${old_CMAKE_REQUIRED_DEFINITIONS})
++endif()
++if (HAVE_LISTEN_SHUTDOWN)
++    set(MSG_LISTEN_SHUTDOWN yes)
++else()
++    set(MSG_LISTEN_SHUTDOWN no)
++endif()
++
++set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++if(HAVE_NETINET_IN_H)
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_NETINET_IN_H)
++endif()
++if(HAVE_SYS_SOCKET_H)
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_SYS_SOCKET_H)
++endif()
++if(HAVE_WINSOCK2_H)
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_WINSOCK2_H)
++endif()
++if(HAVE_WS2TCPIP_H)
++    list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_WS2TCPIP_H)
++endif()
++check_c_source_compiles("
++    #include <stdio.h>
++    #if HAVE_NETINET_IN_H
++    #include <netinet/in.h>
++    #endif
++    #if HAVE_SYS_SOCKET_H
++    #include <sys/socket.h>
++    #endif
++    #if HAVE_WINSOCK2_H
++    #include <winsock2.h>
++    #endif
++    #if HAVE_WS2TCPIP_H
++    #include <ws2tcpip.h>
++    #endif
++
++    int main(int argc, char** argv)
++    {
++        int af=AF_INET6;
++        int pf=PF_INET6;
++        struct sockaddr_in6 sa;
++        printf(\"%d %d %p\\\\n\", af, pf, &sa);
++
++        return 0;
++    }
++    " HAVE_INET6
++)
++
++if (WINDOWS)
++    macro(get_WIN32_WINNT version)
++        if (CMAKE_SYSTEM_VERSION)
++            set(ver ${CMAKE_SYSTEM_VERSION})
++            string(REGEX MATCH "^([0-9]+).([0-9])" ver ${ver})
++            string(REGEX MATCH "^([0-9]+)" verMajor ${ver})
++            # Check for Windows 10, b/c we'll need to convert to hex 'A'.
++            if ("${verMajor}" MATCHES "10")
++                set(verMajor "A")
++                string(REGEX REPLACE "^([0-9]+)" ${verMajor} ver ${ver})
++            endif ("${verMajor}" MATCHES "10")
++            # Remove all remaining '.' characters.
++            string(REPLACE "." "" ver ${ver})
++            # Prepend each digit with a zero.
++            string(REGEX REPLACE "([0-9A-Z])" "0\\1" ver ${ver})
++            set(${version} "0x${ver}")
++        endif(CMAKE_SYSTEM_VERSION)
++    endmacro(get_WIN32_WINNT)
++
++    get_WIN32_WINNT(_WIN32_WINNT)
++    # fixing wrong conditionals in code that check system version instead of compiler version.
++    # E.g. It is not possible to compile with MSVC 2005 on Windows 7.
++    if (${MSVC_VERSION} LESS 1500)
++        set(_WIN32_WINNT 0x501)
++    endif()
++endif()
++
++set(CMAKE_REQUIRED_DEFINITIONS ${old_CMAKE_REQUIRED_DEFINITIONS})
++
++if(WIN32)
++configure_file(w32/common/MHD_config.h MHD_config.h COPYONLY)
++install(FILES w32/common/MHD_config.h DESTINATION include/microhttpd PERMISSIONS OWNER_READ GROUP_READ)
++else()
++configure_file(MHD_config_cmake.h.in MHD_config.h)
++install(FILES MHD_config.h DESTINATION include/microhttpd PERMISSIONS OWNER_READ GROUP_READ)
++endif()
++
++
++set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
++set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
++set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
++
++if (ENABLE_TESTS)
++    enable_testing()
++endif()
++
++add_subdirectory(src/microhttpd)
++
++if (ENABLE_TESTS)
++    add_subdirectory(src/testcurl)
++endif()
++if (ENABLE_EXAMPLES)
++    add_subdirectory(src/examples)
++endif()
++if (ENABLE_DOC)
++    add_subdirectory(doc/doxygen)
++endif()
++
++if (CMAKE_CROSSCOMPILING)
++    set(MSG_CROSSCOMPILING yes)
++else()
++    set(MSG_CROSSCOMPILING no)
++endif()
++
++message(
++"\nlibmicrohttpd ${PACKAGE_VERSION} Configuration Summary:
++  Cross-compiling:   ${MSG_CROSSCOMPILING}
++  Operating System:  ${CMAKE_SYSTEM_NAME}
++  Threading lib:     ${USE_THREADS}
++  Use thread names:  ${MSG_THREAD_NAMES}
++  Inter-thread comm: ${MHD_ITC}
++  libcurl (testing): ${MSG_CURL}
++  Target directory:  ${CMAKE_INSTALL_PREFIX}
++  Shutdown of listening socket
++  trigger select:    ${MSG_LISTEN_SHUTDOWN}
++  Messages:          ${ENABLE_ERROR_MSGS}
++  Basic auth.:       ${ENABLE_BAUTH}
++  Digest auth.:      ${ENABLE_DAUTH}
++  HTTP \"Upgrade\":    ${ENABLE_UPGRADE}
++  Postproc:          ${ENABLE_POSTPROCESSOR}
++  HTTPS support:     ${MSG_HTTPS}
++  poll support:      ${MSG_POLL}
++  epoll support:     ${MSG_EPOLL}
++  build docs:        ${ENABLE_DOC}
++  build examples:    ${ENABLE_EXAMPLES}
++  build tests:       ${ENABLE_TESTS}"
++ )
+diff --git a/MHD_config_cmake.h.in b/MHD_config_cmake.h.in
+new file mode 100644
+index 00000000..2a665044
+--- /dev/null
++++ b/MHD_config_cmake.h.in
+@@ -0,0 +1,558 @@
++/* MHD_config.h.in.  Generated from configure.ac by autoheader.  */
++
++/* Define if building universal (internal helper macro) */
++#cmakedefine AC_APPLE_UNIVERSAL_BUILD @AC_APPLE_UNIVERSAL_BUILD@
++
++/* Define to 1 if libmicrohttpd is compiled with basic Auth support. */
++#cmakedefine BAUTH_SUPPORT @BAUTH_SUPPORT@
++
++/* This is a Cygwin system */
++#cmakedefine CYGWIN @CYGWIN@
++
++/* Define to 1 if libmicrohttpd is compiled with digest Auth support. */
++#cmakedefine DAUTH_SUPPORT @DAUTH_SUPPORT@
++
++/* Define to 1 to enable epoll support */
++#cmakedefine EPOLL_SUPPORT @EPOLL_SUPPORT@
++
++/* This is a FreeBSD system */
++#cmakedefine FREEBSD @FREEBSD@
++
++/* Define to 1 if you have the `accept4' function. */
++#cmakedefine HAVE_ACCEPT4 @HAVE_ACCEPT4@
++
++/* Define to 1 if you have the <arpa/inet.h> header file. */
++#cmakedefine HAVE_ARPA_INET_H @HAVE_ARPA_INET_H@
++
++/* Define to 1 if you have the `gmtime_s' function in C11 form. */
++#cmakedefine HAVE_C11_GMTIME_S @HAVE_C11_GMTIME_S@
++
++/* Define to 1 if you have the usable `calloc' function. */
++#cmakedefine HAVE_CALLOC @HAVE_CALLOC@
++
++/* Have clock_gettime */
++#cmakedefine HAVE_CLOCK_GETTIME @HAVE_CLOCK_GETTIME@
++
++/* Define to 1 if you have `clock_get_time', `host_get_clock_service' and
++   `mach_port_deallocate' functions. */
++#cmakedefine HAVE_CLOCK_GET_TIME @HAVE_CLOCK_GET_TIME@
++
++/* Define to 1 if you have the declaration of `SOCK_NONBLOCK', and to 0 if you
++   don't. */
++#cmakedefine HAVE_DECL_SOCK_NONBLOCK @HAVE_DECL_SOCK_NONBLOCK@
++
++/* Define to 1 if you have the <dlfcn.h> header file. */
++#cmakedefine HAVE_DLFCN_H @HAVE_DLFCN_H@
++
++/* Define to 1 if you have the <endian.h> header file. */
++#cmakedefine HAVE_ENDIAN_H @HAVE_ENDIAN_H@
++
++/* Define if you have epoll_create1 function. */
++#cmakedefine HAVE_EPOLL_CREATE1 @HAVE_EPOLL_CREATE1@
++
++/* Define to 1 if you have the <errno.h> header file. */
++#cmakedefine HAVE_ERRNO_H @HAVE_ERRNO_H@
++
++/* Define to 1 if you have the <fcntl.h> header file. */
++#cmakedefine HAVE_FCNTL_H @HAVE_FCNTL_H@
++
++/* Define to 1 if you have the usable `fork' function. */
++#cmakedefine HAVE_FORK @HAVE_FORK@
++
++/* Define to 1 if fseeko (and presumably ftello) exists and is declared. */
++#cmakedefine HAVE_FSEEKO @HAVE_FSEEKO@
++
++/* Define to 1 if you have the <gcrypt.h> header file. */
++#cmakedefine HAVE_GCRYPT_H @HAVE_GCRYPT_H@
++
++/* Define to 1 if you have `gethrtime' function. */
++#cmakedefine HAVE_GETHRTIME @HAVE_GETHRTIME@
++
++/* Define to 1 if you have the `[gettimeofday]' function. */
++#cmakedefine HAVE_GETTIMEOFDAY @HAVE_GETTIMEOFDAY@
++
++/* Define to 1 if you have the `gmtime_r' function. */
++#cmakedefine HAVE_GMTIME_R @HAVE_GMTIME_R@
++
++/* Define to 1 if you have the <gnutls/gnutls.h> header file. */
++#cmakedefine HAVE_GNUTLS_GNUTLS_H @HAVE_GNUTLS_GNUTLS_H@
++
++/* Provides IPv6 headers */
++#cmakedefine HAVE_INET6 @HAVE_INET6@
++
++/* Define to 1 if you have the <inetLib.h> header file. */
++#cmakedefine HAVE_INETLIB_H @HAVE_INETLIB_H@
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#cmakedefine HAVE_INTTYPES_H @HAVE_INTTYPES_H@
++
++/* Define to 1 if you have a functional curl library. */
++#cmakedefine HAVE_LIBCURL @HAVE_LIBCURL@
++
++/* Define to 1 if you have the <limits.h> header file. */
++#cmakedefine HAVE_LIMITS_H @HAVE_LIMITS_H@
++
++/* can use shutdown on listen sockets */
++#cmakedefine HAVE_LISTEN_SHUTDOWN @HAVE_LISTEN_SHUTDOWN@
++
++/* Define to 1 if you have the <locale.h> header file. */
++#cmakedefine HAVE_LOCALE_H @HAVE_LOCALE_H@
++
++/* Define to 1 if you have the `lseek64' function. */
++#cmakedefine HAVE_LSEEK64 @HAVE_LSEEK64@
++
++/* Define to 1 if you have the <machine/endian.h> header file. */
++#cmakedefine HAVE_MACHINE_ENDIAN_H @HAVE_MACHINE_ENDIAN_H@
++
++/* Define to 1 if you have the <machine/param.h> header file. */
++#cmakedefine HAVE_MACHINE_PARAM_H @HAVE_MACHINE_PARAM_H@
++
++/* Define to 1 if you have the <[magic.h]> header file. */
++#cmakedefine HAVE_MAGIC_H @HAVE_MAGIC_H@
++
++/* Define to 1 if you have the <math.h> header file. */
++#cmakedefine HAVE_MATH_H @HAVE_MATH_H@
++
++/* Define to 1 if you have the `memmem' function. */
++#cmakedefine HAVE_MEMMEM @HAVE_MEMMEM@
++
++/* Define to 1 if you have the <memory.h> header file. */
++#cmakedefine HAVE_MEMORY_H @HAVE_MEMORY_H@
++
++/* Define to 1 to enable support for error messages. */
++#cmakedefine HAVE_MESSAGES @HAVE_MESSAGES@
++
++/* Define to 1 if you have the `[nanosleep]' function. */
++#cmakedefine HAVE_NANOSLEEP @HAVE_NANOSLEEP@
++
++/* Define to 1 if you have the <netdb.h> header file. */
++#cmakedefine HAVE_NETDB_H @HAVE_NETDB_H@
++
++/* Define to 1 if you have the <netinet/in.h> header file. */
++#cmakedefine HAVE_NETINET_IN_H @HAVE_NETINET_IN_H@
++
++/* Define to 1 if you have the <netinet/ip.h> header file. */
++#cmakedefine HAVE_NETINET_IP_H @HAVE_NETINET_IP_H@
++
++/* Define to 1 if you have the <netinet/tcp.h> header file. */
++#cmakedefine HAVE_NETINET_TCP_H @HAVE_NETINET_TCP_H@
++
++/* Define to 1 if you have the <net/if.h> header file. */
++#cmakedefine HAVE_NET_IF_H @HAVE_NET_IF_H@
++
++/* Define if you have usable pipe2(2) function */
++#cmakedefine HAVE_PIPE2_FUNC @HAVE_PIPE2_FUNC@
++
++/* Define to 1 if you have the `poll' function. */
++#cmakedefine HAVE_POLL @HAVE_POLL@
++
++/* Define to 1 if you have the <poll.h> header file. */
++#cmakedefine HAVE_POLL_H @HAVE_POLL_H@
++
++/* Define to 1 if libmicrohttpd is compiled with postprocessor support. */
++#cmakedefine HAVE_POSTPROCESSOR @HAVE_POSTPROCESSOR@
++
++/* Define to 1 if you have the `pread' function. */
++#cmakedefine HAVE_PREAD @HAVE_PREAD@
++
++/* Define to 1 if you have the `pread64' function. */
++#cmakedefine HAVE_PREAD64 @HAVE_PREAD64@
++
++/* Define if you have IBM i form of pthread_attr_setname_np(3) function. */
++#cmakedefine HAVE_PTHREAD_ATTR_SETNAME_NP_IBMI @HAVE_PTHREAD_ATTR_SETNAME_NP_IBMI@
++
++/* Define if you have NetBSD form (or OSF1 form) of pthread_attr_setname_np(3)
++   function. */
++#cmakedefine HAVE_PTHREAD_ATTR_SETNAME_NP_NETBSD @HAVE_PTHREAD_ATTR_SETNAME_NP_NETBSD@
++
++/* Define to 1 if you have the <pthread.h> header file. */
++#cmakedefine HAVE_PTHREAD_H @HAVE_PTHREAD_H@
++
++/* Define to 1 if you have the <pthread_np.h> header file. */
++#cmakedefine HAVE_PTHREAD_NP_H @HAVE_PTHREAD_NP_H@
++
++/* Have PTHREAD_PRIO_INHERIT. */
++#cmakedefine HAVE_PTHREAD_PRIO_INHERIT @HAVE_PTHREAD_PRIO_INHERIT@
++
++/* Define if you have Darwin form of pthread_setname_np(3) function. */
++#cmakedefine HAVE_PTHREAD_SETNAME_NP_DARWIN @HAVE_PTHREAD_SETNAME_NP_DARWIN@
++
++/* Define if you have GNU/Linux form of pthread_setname_np(3) function. */
++#cmakedefine HAVE_PTHREAD_SETNAME_NP_GNU @HAVE_PTHREAD_SETNAME_NP_GNU@
++
++/* Define if you have NetBSD form (or OSF1 form) of pthread_setname_np(3)
++   function. */
++#cmakedefine HAVE_PTHREAD_SETNAME_NP_NETBSD @HAVE_PTHREAD_SETNAME_NP_NETBSD@
++
++/* Define if you have FreeBSD form of pthread_set_name_np(3) function. */
++#cmakedefine HAVE_PTHREAD_SET_NAME_NP_FREEBSD @HAVE_PTHREAD_SET_NAME_NP_FREEBSD@
++
++/* Define to 1 if you have the `rand' function. */
++#cmakedefine HAVE_RAND @HAVE_RAND@
++
++/* Define to 1 if you have the `random' function. */
++#cmakedefine HAVE_RANDOM @HAVE_RANDOM@
++
++/* Define to 1 if you have the real boolean type. */
++#cmakedefine HAVE_REAL_BOOL @HAVE_REAL_BOOL@
++
++/* Define to 1 if you have the <search.h> header file and your system have
++   properly functioning tsearch(), tfind() and tdelete() functions */
++#cmakedefine HAVE_SEARCH_H @HAVE_SEARCH_H@
++
++/* Define to 1 if you have the `sendfile64' function. */
++#cmakedefine HAVE_SENDFILE64 @HAVE_SENDFILE64@
++
++/* Define to 1 if you have the `snprintf' function. */
++#cmakedefine HAVE_SNPRINTF @HAVE_SNPRINTF@
++
++/* Do we have sockaddr_in.sin_len? */
++#cmakedefine HAVE_SOCKADDR_IN_SIN_LEN @HAVE_SOCKADDR_IN_SIN_LEN@
++
++/* Define to 1 if you have the <sockLib.h> header file. */
++#cmakedefine HAVE_SOCKLIB_H @HAVE_SOCKLIB_H@
++
++/* SOCK_NONBLOCK is defined in a socket header */
++#cmakedefine HAVE_SOCK_NONBLOCK @HAVE_SOCK_NONBLOCK@
++
++/* Define to 1 if you have the <stdbool.h> header file and <stdbool.h> defines
++   'bool' type. */
++#cmakedefine HAVE_STDBOOL_H @HAVE_STDBOOL_H@
++
++/* Define to 1 if you have the <stddef.h> header file. */
++#cmakedefine HAVE_STDDEF_H @HAVE_STDDEF_H@
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#cmakedefine HAVE_STDINT_H @HAVE_STDINT_H@
++
++/* Define to 1 if you have the <stdio.h> header file. */
++#cmakedefine HAVE_STDIO_H @HAVE_STDIO_H@
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#cmakedefine HAVE_STDLIB_H @HAVE_STDLIB_H@
++
++/* Define to 1 if you have the <strings.h> header file. */
++#cmakedefine HAVE_STRINGS_H @HAVE_STRINGS_H@
++
++/* Define to 1 if you have the <string.h> header file. */
++#cmakedefine HAVE_STRING_H @HAVE_STRING_H@
++
++/* Define to 1 if you have the <sys/byteorder.h> header file. */
++#cmakedefine HAVE_SYS_BYTEORDER_H @HAVE_SYS_BYTEORDER_H@
++
++/* Define to 1 if you have the <sys/endian.h> header file. */
++#cmakedefine HAVE_SYS_ENDIAN_H @HAVE_SYS_ENDIAN_H@
++
++/* Define to 1 if you have the <[sys/eventfd.h]> header file. */
++#cmakedefine HAVE_SYS_EVENTFD_H @HAVE_SYS_EVENTFD_H@
++
++/* Define to 1 if you have the <sys/ioctl.h> header file. */
++#cmakedefine HAVE_SYS_IOCTL_H @HAVE_SYS_IOCTL_H@
++
++/* Define to 1 if you have the <sys/isa_defs.h> header file. */
++#cmakedefine HAVE_SYS_ISA_DEFS_H @HAVE_SYS_ISA_DEFS_H@
++
++/* Define to 1 if you have the <sys/machine.h> header file. */
++#cmakedefine HAVE_SYS_MACHINE_H @HAVE_SYS_MACHINE_H@
++
++/* Define to 1 if you have the <sys/mman.h> header file. */
++#cmakedefine HAVE_SYS_MMAN_H @HAVE_SYS_MMAN_H@
++
++/* Define to 1 if you have the <sys/msg.h> header file. */
++#cmakedefine HAVE_SYS_MSG_H @HAVE_SYS_MSG_H@
++
++/* Define to 1 if you have the <sys/param.h> header file. */
++#cmakedefine HAVE_SYS_PARAM_H @HAVE_SYS_PARAM_H@
++
++/* Define to 1 if you have the <sys/select.h> header file. */
++#cmakedefine HAVE_SYS_SELECT_H @HAVE_SYS_SELECT_H@
++
++/* Define to 1 if you have the <sys/socket.h> header file. */
++#cmakedefine HAVE_SYS_SOCKET_H @HAVE_SYS_SOCKET_H@
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#cmakedefine HAVE_SYS_STAT_H @HAVE_SYS_STAT_H@
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#cmakedefine HAVE_SYS_TIME_H @HAVE_SYS_TIME_H@
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#cmakedefine HAVE_SYS_TYPES_H @HAVE_SYS_TYPES_H@
++
++/* Define to 1 if you have the <time.h> header file. */
++#cmakedefine HAVE_TIME_H @HAVE_TIME_H@
++
++/* Define to 1 if you have the `tsearch' function. */
++#cmakedefine HAVE_TSEARCH @HAVE_TSEARCH@
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#cmakedefine HAVE_UNISTD_H @HAVE_UNISTD_H@
++
++/* Define to 1 if you have the `[usleep]' function. */
++#cmakedefine HAVE_USLEEP @HAVE_USLEEP@
++
++/* Define to 1 if you have the `gmtime_s' function in W32 form. */
++#cmakedefine HAVE_W32_GMTIME_S @HAVE_W32_GMTIME_S@
++
++/* Define to 1 if you have the usable `waitpid' function. */
++#cmakedefine HAVE_WAITPID @HAVE_WAITPID@
++
++/* Define to 1 if you have the <winsock2.h> header file. */
++#cmakedefine HAVE_WINSOCK2_H @HAVE_WINSOCK2_H@
++
++/* Define to 1 if you have the <ws2tcpip.h> header file. */
++#cmakedefine HAVE_WS2TCPIP_H @HAVE_WS2TCPIP_H@
++
++/* Define to 1 if libmicrohttpd is compiled with HTTPS support. */
++#cmakedefine HTTPS_SUPPORT @HTTPS_SUPPORT@
++
++/* Define to 1 if your C compiler supports inline functions. */
++#cmakedefine INLINE_FUNC @INLINE_FUNC@
++
++/* Defined if libcurl supports AsynchDNS */
++#cmakedefine LIBCURL_FEATURE_ASYNCHDNS @LIBCURL_FEATURE_ASYNCHDNS@
++
++/* Defined if libcurl supports IDN */
++#cmakedefine LIBCURL_FEATURE_IDN @LIBCURL_FEATURE_IDN@
++
++/* Defined if libcurl supports IPv6 */
++#cmakedefine LIBCURL_FEATURE_IPV6 @LIBCURL_FEATURE_IPV6@
++
++/* Defined if libcurl supports KRB4 */
++#cmakedefine LIBCURL_FEATURE_KRB4 @LIBCURL_FEATURE_KRB4@
++
++/* Defined if libcurl supports libz */
++#cmakedefine LIBCURL_FEATURE_LIBZ @LIBCURL_FEATURE_LIBZ@
++
++/* Defined if libcurl supports NTLM */
++#cmakedefine LIBCURL_FEATURE_NTLM @LIBCURL_FEATURE_NTLM@
++
++/* Defined if libcurl supports SSL */
++#cmakedefine LIBCURL_FEATURE_SSL @LIBCURL_FEATURE_SSL@
++
++/* Defined if libcurl supports SSPI */
++#cmakedefine LIBCURL_FEATURE_SSPI @LIBCURL_FEATURE_SSPI@
++
++/* Defined if libcurl supports DICT */
++#cmakedefine LIBCURL_PROTOCOL_DICT @LIBCURL_PROTOCOL_DICT@
++
++/* Defined if libcurl supports FILE */
++#cmakedefine LIBCURL_PROTOCOL_FILE @LIBCURL_PROTOCOL_FILE@
++
++/* Defined if libcurl supports FTP */
++#cmakedefine LIBCURL_PROTOCOL_FTP @LIBCURL_PROTOCOL_FTP@
++
++/* Defined if libcurl supports FTPS */
++#cmakedefine LIBCURL_PROTOCOL_FTPS @LIBCURL_PROTOCOL_FTPS@
++
++/* Defined if libcurl supports HTTP */
++#cmakedefine LIBCURL_PROTOCOL_HTTP @LIBCURL_PROTOCOL_HTTP@
++
++/* Defined if libcurl supports HTTPS */
++#cmakedefine LIBCURL_PROTOCOL_HTTPS @LIBCURL_PROTOCOL_HTTPS@
++
++/* Defined if libcurl supports IMAP */
++#cmakedefine LIBCURL_PROTOCOL_IMAP @LIBCURL_PROTOCOL_IMAP@
++
++/* Defined if libcurl supports LDAP */
++#cmakedefine LIBCURL_PROTOCOL_LDAP @LIBCURL_PROTOCOL_LDAP@
++
++/* Defined if libcurl supports POP3 */
++#cmakedefine LIBCURL_PROTOCOL_POP3 @LIBCURL_PROTOCOL_POP3@
++
++/* Defined if libcurl supports RTSP */
++#cmakedefine LIBCURL_PROTOCOL_RTSP @LIBCURL_PROTOCOL_RTSP@
++
++/* Defined if libcurl supports SMTP */
++#cmakedefine LIBCURL_PROTOCOL_SMTP @LIBCURL_PROTOCOL_SMTP@
++
++/* Defined if libcurl supports TELNET */
++#cmakedefine LIBCURL_PROTOCOL_TELNET @LIBCURL_PROTOCOL_TELNET@
++
++/* Defined if libcurl supports TFTP */
++#cmakedefine LIBCURL_PROTOCOL_TFTP @LIBCURL_PROTOCOL_TFTP@
++
++/* This is a Linux kernel */
++#cmakedefine LINUX @LINUX@
++
++/* Define to the sub-directory where libtool stores uninstalled libraries. */
++#cmakedefine LT_OBJDIR @LT_OBJDIR@
++
++/* Define to 1 to disable setting name on generated threads */
++#cmakedefine MHD_NO_THREAD_NAMES @MHD_NO_THREAD_NAMES@
++
++/* gnuTLS lib version - used in conjunction with cURL */
++#cmakedefine MHD_REQ_CURL_GNUTLS_VERSION "@MHD_REQ_CURL_GNUTLS_VERSION@"
++
++/* NSS lib version - used in conjunction with cURL */
++#cmakedefine MHD_REQ_CURL_NSS_VERSION "@MHD_REQ_CURL_NSS_VERSION@"
++
++/* required cURL SSL version to run tests */
++#cmakedefine MHD_REQ_CURL_OPENSSL_VERSION "@MHD_REQ_CURL_OPENSSL_VERSION@"
++
++/* required cURL version to run tests */
++#cmakedefine MHD_REQ_CURL_VERSION "@MHD_REQ_CURL_VERSION@"
++
++/* define to use pthreads */
++#cmakedefine MHD_USE_POSIX_THREADS @MHD_USE_POSIX_THREADS@
++
++/* define to use W32 threads */
++#cmakedefine MHD_USE_W32_THREADS @MHD_USE_W32_THREADS@
++
++/* This is a MinGW system */
++#cmakedefine MINGW @MINGW@
++
++/* This is a NetBSD system */
++#cmakedefine NETBSD @NETBSD@
++
++/* This is an OpenBSD system */
++#cmakedefine OPENBSD @OPENBSD@
++
++/* This is a OS/390 system */
++#cmakedefine OS390 @OS390@
++
++/* This is an OS X system */
++#cmakedefine OSX @OSX@
++
++/* Some strange OS */
++#cmakedefine OTHEROS @OTHEROS@
++
++/* Name of package */
++#cmakedefine PACKAGE "@PACKAGE@"
++
++/* Define to the address where bug reports for this package should be sent. */
++#cmakedefine PACKAGE_BUGREPORT "@PACKAGE_BUGREPORT@"
++
++/* Define to the full name of this package. */
++#cmakedefine PACKAGE_NAME "@PACKAGE_NAME@"
++
++/* Define to the full name and version of this package. */
++#cmakedefine PACKAGE_STRING "@PACKAGE_STRING@"
++
++/* Define to the one symbol short name of this package. */
++#cmakedefine PACKAGE_TARNAME "@PACKAGE_TARNAME@"
++
++/* Define to the home page for this package. */
++#cmakedefine PACKAGE_URL "@PACKAGE_URL@"
++
++/* Define to the version of this package. */
++#cmakedefine PACKAGE_VERSION "@PACKAGE_VERSION@"
++
++/* Define to necessary symbol if this constant uses a non-standard name on
++   your system. */
++#cmakedefine PTHREAD_CREATE_JOINABLE @PTHREAD_CREATE_JOINABLE@
++
++/* This is a Solaris system */
++#cmakedefine SOLARIS @SOLARIS@
++
++/* This is a BSD system */
++#cmakedefine SOMEBSD @SOMEBSD@
++
++/* Define to 1 if you have the ANSI C header files. */
++#cmakedefine STDC_HEADERS @STDC_HEADERS@
++
++/* Define to 1 if libmicrohttpd is compiled with HTTP Upgrade support. */
++#cmakedefine UPGRADE_SUPPORT @UPGRADE_SUPPORT@
++
++/* Version number of package */
++#cmakedefine VERSION "@VERSION@"
++
++/* This is a Windows system */
++#cmakedefine WINDOWS @WINDOWS@
++
++/* The Windows version */
++#cmakedefine _WIN32_WINNT @_WIN32_WINNT@
++
++/* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
++   significant byte first (like Motorola and SPARC, unlike Intel). */
++#if defined AC_APPLE_UNIVERSAL_BUILD
++# if defined __BIG_ENDIAN__
++#  define WORDS_BIGENDIAN 1
++# endif
++#else
++# ifndef WORDS_BIGENDIAN
++   #cmakedefine WORDS_BIGENDIAN
++# endif
++#endif
++
++/* Define to 1 if it is required by headers to expose additional symbols */
++#cmakedefine _ALL_SOURCE @_ALL_SOURCE@
++
++/* Define to 1 if it is required by headers to expose additional symbols */
++#cmakedefine _BSD_SOURCE @_BSD_SOURCE@
++
++/* Define to 1 if it is required by headers to expose additional symbols */
++#cmakedefine _DARWIN_C_SOURCE @_DARWIN_C_SOURCE@
++
++/* Enable large inode numbers on Mac OS X 10.5.  */
++#ifndef _DARWIN_USE_64_BIT_INODE
++# define _DARWIN_USE_64_BIT_INODE 1
++#endif
++
++/* Number of bits in a file offset, on hosts where this is settable. */
++#cmakedefine _FILE_OFFSET_BITS @_FILE_OFFSET_BITS@
++
++/* Define to 1 to enable GNU-related header features */
++#cmakedefine _GNU_SOURCE @_GNU_SOURCE@
++
++/* Define to 1 to make fseeko visible on some hosts (e.g. glibc 2.2). */
++#cmakedefine _LARGEFILE_SOURCE @_LARGEFILE_SOURCE@
++
++/* Define for large files, on AIX-style hosts. */
++#cmakedefine _LARGE_FILES @_LARGE_FILES@
++
++/* defines how to decorate public symbols while building */
++#cmakedefine _MHD_EXTERN @_MHD_EXTERN@
++
++/* Define to use eventFD for inter-thread communication */
++#cmakedefine _MHD_ITC_EVENTFD @_MHD_ITC_EVENTFD@
++
++/* Define to use pipe for inter-thread communication */
++#cmakedefine _MHD_ITC_PIPE @_MHD_ITC_PIPE@
++
++/* Define to use socketpair for inter-thread communication */
++#cmakedefine _MHD_ITC_SOCKETPAIR @_MHD_ITC_SOCKETPAIR@
++
++/* Define to prefix which will be used with MHD inline functions. */
++#cmakedefine _MHD_inline @_MHD_inline@
++
++/* Define to 1 if it is required by headers to expose additional symbols */
++#cmakedefine _NETBSD_SOURCE @_NETBSD_SOURCE@
++
++/* Need with solaris or errno doesnt work */
++#cmakedefine _REENTRANT @_REENTRANT@
++
++/* Define to 1 if it is required by headers to expose additional symbols */
++#cmakedefine _TANDEM_SOURCE @_TANDEM_SOURCE@
++
++/* Define to maximum value supported by system headers */
++#cmakedefine _XOPEN_SOURCE @_XOPEN_SOURCE@
++
++/* Define to 1 if _XOPEN_SOURCE is defined to value less than 500 and system
++   headers requre this symbol */
++#cmakedefine _XOPEN_SOURCE_EXTENDED @_XOPEN_SOURCE_EXTENDED@
++
++/* Define to maximum value supported by system headers if _XOPEN_SOURCE is
++   defined to value less than 500 and headers do not support
++   _XOPEN_SOURCE_EXTENDED */
++#cmakedefine _XOPEN_VERSION @_XOPEN_VERSION@
++
++/* Define to 1 if it is required by headers to expose additional symbols */
++#cmakedefine __BSD_VISIBLE @__BSD_VISIBLE@
++
++/* Define to 1 if it is required by headers to expose additional symbols */
++#cmakedefine __EXTENSIONS__ @__EXTENSIONS__@
++
++/* Define to type name which will be used as boolean type. */
++#cmakedefine bool @bool@
++
++/* Define curl_free() as free() if our version of curl lacks curl_free. */
++#cmakedefine curl_free @curl_free@
++
++/* Define to value interpreted by compiler as boolean "false", if "false" is
++   not defined by system headers. */
++#cmakedefine false @false@
++
++/* Define to value interpreted by compiler as boolean "true", if "true" is not
++   defined by system headers. */
++#cmakedefine true @true@
+\ No newline at end of file
+diff --git a/cmake/DetermineFork.cmake b/cmake/DetermineFork.cmake
+new file mode 100644
+index 00000000..091e4992
+--- /dev/null
++++ b/cmake/DetermineFork.cmake
+@@ -0,0 +1,64 @@
++cmake_minimum_required(VERSION 3.1)
++
++include(CheckIncludeFiles)
++include(CheckCSourceCompiles)
++
++#
++# Macro sets following variables for fork functionality
++# - HAVE_FORK
++# - HAVE_FORK_WAITPID
++#
++macro(determine_fork)
++    check_include_files(sys/types.h HAVE_SYS_TYPES_H)
++    check_include_files(unistd.h HAVE_UNISTD_H)
++    set(old_determine_fork_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    if (HAVE_SYS_TYPES_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_SYS_TYPES_H)
++    endif()
++    if (HAVE_UNISTD_H)
++        list(APPEND CMAKE_REQUIRED_DEFINITIONS -DHAVE_UNISTD_H)
++    endif()
++
++    check_c_source_compiles("
++        #ifdef HAVE_SYS_TYPES_H
++        #include <sys/types.h>
++        #endif
++        #ifdef HAVE_UNISTD_H
++        #include <unistd.h>
++        #endif
++
++        int main(int argc, char** argv)
++        {
++          pid_t p = fork ();
++          if (0 == p) return 1;
++
++          return 0;
++        }
++        " HAVE_FORK
++    )
++
++    if (HAVE_FORK)
++        check_c_source_compiles("
++            #ifdef HAVE_SYS_TYPES_H
++            #include <sys/types.h>
++            #endif
++            #ifdef HAVE_UNISTD_H
++            #include <unistd.h>
++            #endif
++            #include <sys/wait.h>
++
++            int main(int argc, char** argv)
++            {
++              pid_t p = fork ();
++              if (0 == p) return 1;
++
++              waitpid (p, (void*)0, 0);
++
++              return 0;
++            }
++            " HAVE_FORK_WAITPID
++        )
++    endif()
++
++    set(CMAKE_REQUIRED_DEFINITIONS ${old_determine_fork_CMAKE_REQUIRED_DEFINITIONS})
++endmacro()
+\ No newline at end of file
+diff --git a/cmake/DetermineStdCHeaders.cmake b/cmake/DetermineStdCHeaders.cmake
+new file mode 100644
+index 00000000..4834c7af
+--- /dev/null
++++ b/cmake/DetermineStdCHeaders.cmake
+@@ -0,0 +1,50 @@
++cmake_minimum_required(VERSION 3.1)
++
++include(CheckIncludeFiles)
++include(CheckSymbolExists)
++include(CheckCSourceRuns)
++
++function(determine_std_c_headers result)
++    check_include_files(stdlib.h HAVE_STDLIB_H)
++    check_include_files(stdarg.h HAVE_STDARG_H)
++    check_include_files(string.h HAVE_STRING_H)
++    check_include_files(float.h HAVE_FLOAT_H)
++    check_symbol_exists(memchr "string.h" HAVE_memchr)
++    check_symbol_exists(free "stdlib.h" HAVE_free)
++
++
++    if (HAVE_STDLIB_H AND HAVE_STDARG_H AND HAVE_STRING_H AND HAVE_FLOAT_H AND HAVE_memchr AND HAVE_free)
++        if (NOT CMAKE_CROSSCOMPILING)
++            check_c_source_runs("
++                #include <ctype.h>
++                #include <stdlib.h>
++                #if ((' ' & 0x0FF) == 0x020)
++                # define ISLOWER(c) ('a' <= (c) && (c) <= 'z')
++                # define TOUPPER(c) (ISLOWER(c) ? 'A' + ((c) - 'a') : (c))
++                #else
++                # define ISLOWER(c) \
++                           (('a' <= (c) && (c) <= 'i') \
++                             || ('j' <= (c) && (c) <= 'r') \
++                             || ('s' <= (c) && (c) <= 'z'))
++                # define TOUPPER(c) (ISLOWER(c) ? ((c) | 0x40) : (c))
++                #endif
++
++                #define XOR(e, f) (((e) && !(f)) || (!(e) && (f)))
++                int
++                main ()
++                {
++                  int i;
++                  for (i = 0; i < 256; i++)
++                    if (XOR (islower (i), ISLOWER (i))
++                    || toupper (i) != TOUPPER (i))
++                      return 2;
++                  return 0;
++                } " STDC_SUPPORT_HIGH_BIT_CHARS)
++            if (STDC_SUPPORT_HIGH_BIT_CHARS)
++                set(${result} 1 PARENT_SCOPE)
++            endif()
++        else()
++            set(${result} 1 PARENT_SCOPE)
++        endif()
++    endif()
++endfunction()
+\ No newline at end of file
+diff --git a/cmake/DetermineSystemExtension.cmake b/cmake/DetermineSystemExtension.cmake
+new file mode 100644
+index 00000000..cbad088d
+--- /dev/null
++++ b/cmake/DetermineSystemExtension.cmake
+@@ -0,0 +1,415 @@
++cmake_minimum_required(VERSION 3.1)
++
++include(CheckIncludeFiles)
++include(CheckCSourceCompiles)
++include(CheckSymbolExists)
++
++function(determine_x_open_source BasicIncludes XOpenSource)
++        set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    set(CMAKE_REQUIRED_DEFINITIONS -D_XOPEN_SOURCE=700)
++
++    # Check if _XOPEN_SOURCE version 700 is supported
++    check_c_source_compiles("
++        ${BasicIncludes}
++
++        /* Check will be passed if ALL features are avalable
++         * and failed if ANY feature is not avalable. */
++        int main()
++        {
++
++        #ifndef stpncpy
++          (void) stpncpy;
++        #endif
++        #ifndef strnlen
++          (void) strnlen;
++        #endif
++
++        #if !defined(__NetBSD__) && !defined(__OpenBSD__)
++        /* NetBSD and OpenBSD didn't implement wcsnlen() for some reason. */
++        #ifndef wcsnlen
++          (void) wcsnlen;
++        #endif
++        #endif
++
++        #ifdef __CYGWIN__
++        /* The only depend function on Cygwin, but missing on some other platforms */
++        #ifndef strndup
++          (void) strndup;
++        #endif
++        #endif
++
++        #ifndef __sun
++        /* illumos forget to uncomment some _XPG7 macros. */
++        #ifndef renameat
++          (void) renameat;
++        #endif
++
++        #ifndef getline
++          (void) getline;
++        #endif
++        #endif /* ! __sun */
++
++        /* gmtime_r() becomes mandatory only in POSIX.1-2008. */
++        #ifndef gmtime_r
++          (void) gmtime_r;
++        #endif
++
++        /* unsetenv() actually defined in POSIX.1-2001 so it
++         * must be present with _XOPEN_SOURCE == 700 too. */
++        #ifndef unsetenv
++          (void) unsetenv;
++        #endif
++
++          return 0;
++        }
++
++        " SUPPORT_XOPEN_SOURCE_700
++    )
++
++    set(CMAKE_REQUIRED_DEFINITIONS ${old_CMAKE_REQUIRED_DEFINITIONS})
++
++    if (SUPPORT_XOPEN_SOURCE_700)
++        set(${XOpenSource} 700 PARENT_SCOPE)
++        return()
++    endif()
++
++    # Check if _XOPEN_SOURCE version 600 is supported
++    set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    set(CMAKE_REQUIRED_DEFINITIONS -D_XOPEN_SOURCE=600)
++
++    check_c_source_compiles("
++        ${BasicIncludes}
++
++        /* Check will be passed if ALL features are available
++         * and failed if ANY feature is not available. */
++        int main()
++        {
++
++        #ifndef setenv
++          (void) setenv;
++        #endif
++
++        #ifndef __NetBSD__
++        #ifndef vsscanf
++          (void) vsscanf;
++        #endif
++        #endif
++
++        /* Availability of next features varies, but they all must be present
++         * on platform with support for _XOPEN_SOURCE = 600. */
++
++        /* vsnprintf() should be available with _XOPEN_SOURCE >= 500, but some platforms
++         * provide it only with _POSIX_C_SOURCE >= 200112 (autodefined when
++         * _XOPEN_SOURCE >= 600) where specification of vsnprintf() is aligned with
++         * ISO C99 while others platforms defined it with even earlier standards. */
++        #ifndef vsnprintf
++          (void) vsnprintf;
++        #endif
++
++        /* On platforms that prefer POSIX over X/Open, fseeko() is available
++         * with _POSIX_C_SOURCE >= 200112 (autodefined when _XOPEN_SOURCE >= 600).
++         * On other platforms it should be available with _XOPEN_SOURCE >= 500. */
++        #ifndef fseeko
++          (void) fseeko;
++        #endif
++
++        /* F_GETOWN must be defined with _XOPEN_SOURCE >= 600, but some platforms
++         * define it with _XOPEN_SOURCE >= 500. */
++        #ifndef F_GETOWN
++        #error F_GETOWN is not defined
++        #endif
++          return 0;
++        }
++
++        " SUPPORT_XOPEN_SOURCE_600
++    )
++
++    set(CMAKE_REQUIRED_DEFINITIONS ${old_CMAKE_REQUIRED_DEFINITIONS})
++
++    if (SUPPORT_XOPEN_SOURCE_600)
++        set(${XOpenSource} 600 PARENT_SCOPE)
++        return()
++    endif()
++
++    # Check if _XOPEN_SOURCE version 500 is supported
++    set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    set(CMAKE_REQUIRED_DEFINITIONS -D_XOPEN_SOURCE=500)
++
++
++    check_c_source_compiles("
++        ${BasicIncludes}
++
++        /* Check will be passed if ALL features are available
++         * and failed if ANY feature is not available. */
++        int main()
++        {
++        /* It's not easy to write reliable test for _XOPEN_SOURCE = 500 as
++         * platforms not always precisely follow this standard and some
++         * functions are already deprecated in later standards. */
++
++        /* Availability of next features varies, but they all must be present
++         * on platform with correct support for _XOPEN_SOURCE = 500. */
++
++        /* Mandatory with _XOPEN_SOURCE >= 500 but as XSI extension available
++         * with much older standards. */
++        #ifndef ftruncate
++          (void) ftruncate;
++        #endif
++
++        /* Added with _XOPEN_SOURCE >= 500 but was available in some standards
++         * before. XSI extension. */
++        #ifndef pread
++          (void) pread;
++        #endif
++
++        #ifndef __APPLE__
++        /* Actually comes from XPG4v2 and must be available
++         * with _XOPEN_SOURCE >= 500 as well. */
++        #ifndef symlink
++          (void) symlink;
++        #endif
++
++        /* Actually comes from XPG4v2 and must be available
++         * with _XOPEN_SOURCE >= 500 as well. XSI extension. */
++        #ifndef strdup
++          (void) strdup;
++        #endif
++        #endif /* ! __APPLE__ */
++          return 0;
++        }
++
++
++        " SUPPORT_XOPEN_SOURCE_500
++    )
++
++    if (SUPPORT_XOPEN_SOURCE_500)
++        set(${XOpenSource} 500 PARENT_SCOPE)
++        return()
++    endif()
++
++    # Check if _XOPEN_SOURCE version 1 is supported
++    set(old_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    set(CMAKE_REQUIRED_DEFINITIONS -D_XOPEN_SOURCE=1)
++
++
++    check_c_source_compiles("
++        ${BasicIncludes}
++
++        int main()
++        {
++          return 0;
++        }
++
++
++        " SUPPORT_XOPEN_SOURCE_1
++    )
++
++    if (SUPPORT_XOPEN_SOURCE_1)
++        set(${XOpenSource} 1 PARENT_SCOPE)
++        return()
++    endif()
++endfunction()
++
++#
++# Macro sets following variables if headers supports them
++# - _XOPEN_SOURCE             - Possible values
++#                               - 700 - enable POSIX.1-2008/SUSv4 features
++#                               - 600 - enable POSIX.1-2001/SUSv3 features
++#                               - 500 - enable SUSv2/XPG5 features
++#                               - 1 - Earlier standards are widely supported, so just define macros to maximum value which do not break headers
++# - _GNU_SOURCE               - used if headers allow
++# - _DARWIN_C_SOURCE          - enables additional functionality on Darwin
++# - __EXTENSIONS__            - unlocks almost all interfaces on Solaris
++# - _NETBSD_SOURCE            - switch on almost all headers definitions on NetBSD
++# - _BSD_SOURCE               - currently used only on OpenBSD to unhide functions.
++# - _TANDEM_SOURCE            - unhides most functions on NonStop OS
++# - _ALL_SOURCE               - makes visible POSIX and non-POSIX symbols on z/OS, AIX and Interix
++# - BasicIncludes             - basic includes supported by system
++# - SystemExtensionsDefines   - variables above as defines options for compiler
++#
++macro(determine_system_extension)
++    check_include_files(stdio.h HAVE_STDIO_H)
++    check_include_files(stdlib.h HAVE_STDLIB_H)
++    check_include_files(string.h HAVE_STRING_H)
++    check_include_files(strings.h HAVE_STRINGS_H)
++    check_include_files(stdint.h HAVE_STDINT_H)
++    check_include_files(time.h HAVE_TIME_H)
++    check_include_files(sys/types.h HAVE_SYS_TYPES_H)
++    check_include_files(unistd.h HAVE_UNISTD_H)
++    check_include_files(wchar.h HAVE_WCHAR_H)
++    check_include_files(fcntl.h HAVE_FCNTL_H)
++
++    set(BasicIncludes "")
++    if (HAVE_STDIO_H)
++        string(APPEND BasicIncludes "#include<stdio.h>\n")
++    endif()
++    if (HAVE_STDLIB_H)
++        string(APPEND BasicIncludes "#include<stdlib.h>\n")
++    endif()
++    if (HAVE_STRING_H)
++        string(APPEND BasicIncludes "#include<string.h>\n")
++    endif()
++    if (HAVE_STRINGS_H)
++        string(APPEND BasicIncludes "#include<strings.h>\n")
++    endif()
++    if (HAVE_STDINT_H)
++        string(APPEND BasicIncludes "#include<stdint.h>\n")
++    endif()
++    if (HAVE_TIME_H)
++        string(APPEND BasicIncludes "#include<time.h>\n")
++    endif()
++    if (HAVE_SYS_TYPES_H)
++        string(APPEND BasicIncludes "#include<sys/types.h>\n")
++    endif()
++    if (HAVE_UNISTD_H)
++        string(APPEND BasicIncludes "#include<unistd.h>\n")
++    endif()
++    if (HAVE_WCHAR_H)
++        string(APPEND BasicIncludes "#include<wchar.h>\n")
++    endif()
++    if (HAVE_FCNTL_H)
++        string(APPEND BasicIncludes "#include<fcntl.h>\n")
++    endif()
++
++    set(old_DetermineSystemExtension_CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS})
++    set(SystemExtensionsDefines "")
++    set(CMAKE_REQUIRED_DEFINITIONS "")
++
++    determine_x_open_source("${BasicIncludes}" _XOPEN_SOURCE)
++    if (_XOPEN_SOURCE)
++        list(APPEND SystemExtensionsDefines -D_XOPEN_SOURCE=${_XOPEN_SOURCE})
++    endif()
++
++    # check if basic includes supports _GNU_SOURCE
++    set(CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines} -D_GNU_SOURCE)
++    check_c_source_compiles("
++        ${BasicIncludes}
++
++        int main()
++        {
++          return 0;
++        }
++
++        " _GNU_SOURCE
++    )
++    if (_GNU_SOURCE)
++        list(APPEND SystemExtensionsDefines -D_GNU_SOURCE)
++    endif()
++
++    # check if basic includes supports _DARWIN_C_SOURCE for Apple
++    check_symbol_exists(__APPLE__ "" IS_APPLE)
++    if (IS_APPLE)
++        set(CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines} -D_DARWIN_C_SOURCE)
++        check_c_source_compiles("
++            ${BasicIncludes}
++
++            int main()
++            {
++              return 0;
++            }
++
++            " _DARWIN_C_SOURCE
++        )
++        if (_DARWIN_C_SOURCE)
++            list(APPEND SystemExtensionsDefines -D_DARWIN_C_SOURCE)
++        endif()
++    endif()
++
++    # check if basic includes supports __EXTENSIONS__ for Sun
++    check_symbol_exists(__sun "" IS_SUN)
++    if (IS_SUN)
++        set(CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines} -D__EXTENSIONS__)
++        check_c_source_compiles("
++            ${BasicIncludes}
++
++            int main()
++            {
++              return 0;
++            }
++
++            " __EXTENSIONS__
++        )
++        if (__EXTENSIONS__)
++            list(APPEND SystemExtensionsDefines -D__EXTENSIONS__)
++        endif()
++    endif()
++
++    # check if basic includes supports _NETBSD_SOURCE for NetBSD
++    check_symbol_exists(__NetBSD__ "" IS_NetBSD)
++    if (IS_NetBSD)
++        set(CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines} -D_NETBSD_SOURCE)
++        check_c_source_compiles("
++            ${BasicIncludes}
++
++            int main()
++            {
++              return 0;
++            }
++
++            " _NETBSD_SOURCE
++        )
++        if (_NETBSD_SOURCE)
++            list(APPEND SystemExtensionsDefines -D_NETBSD_SOURCE)
++        endif()
++    endif()
++
++    # check if basic includes supports _BSD_SOURCE for OpenBSD
++    check_symbol_exists(__OpenBSD__ "" IS_OpenBSD)
++    if (IS_OpenBSD)
++        set(CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines} -D_BSD_SOURCE)
++        check_c_source_compiles("
++            ${BasicIncludes}
++
++            int main()
++            {
++              return 0;
++            }
++
++            " _BSD_SOURCE
++        )
++        if (_BSD_SOURCE)
++            list(APPEND SystemExtensionsDefines -D_BSD_SOURCE)
++        endif()
++    endif()
++
++    # check if basic includes supports _TANDEM_SOURCE for NonStop OS
++    check_symbol_exists(__TANDEM "" IS_TANDEM)
++    if (IS_TANDEM)
++        set(CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines} -D_TANDEM_SOURCE)
++        check_c_source_compiles("
++            ${BasicIncludes}
++
++            int main()
++            {
++              return 0;
++            }
++
++            " _TANDEM_SOURCE
++        )
++        if (_TANDEM_SOURCE)
++            list(APPEND SystemExtensionsDefines -D_TANDEM_SOURCE)
++        endif()
++    endif()
++
++    # check if basic includes supports _ALL_SOURCE for z/OS, AIX and Interix
++    check_symbol_exists(__TOS_MVS__ "" IS_TOS_MVS)
++    check_symbol_exists(__INTERIX "" IS_INTERIX)
++    if (__INTERIX OR __TOS_MVS__)
++        set(CMAKE_REQUIRED_DEFINITIONS ${SystemExtensionsDefines} -D_ALL_SOURCE)
++        check_c_source_compiles("
++            ${BasicIncludes}
++
++            int main()
++            {
++              return 0;
++            }
++
++            " _ALL_SOURCE
++        )
++        if (_ALL_SOURCE)
++            list(APPEND SystemExtensionsDefines -D_ALL_SOURCE)
++        endif()
++    endif()
++
++    set(CMAKE_REQUIRED_DEFINITIONS ${old_DetermineSystemExtension_CMAKE_REQUIRED_DEFINITIONS})
++endmacro()
+\ No newline at end of file
+diff --git a/cmake/DetermineTargetEndianess.cmake b/cmake/DetermineTargetEndianess.cmake
+new file mode 100644
+index 00000000..9622abc7
+--- /dev/null
++++ b/cmake/DetermineTargetEndianess.cmake
+@@ -0,0 +1,98 @@
++# Based on the boost endian.hpp
++
++set(endiandetect_c_code "
++// GNU libc offers the helpful header <endian.h> which defines
++// __BYTE_ORDER
++
++#if defined (__GLIBC__)
++# include <endian.h>
++# if (__BYTE_ORDER == __LITTLE_ENDIAN)
++#  error cmake_ENDIANNESS little
++# elif (__BYTE_ORDER == __BIG_ENDIAN)
++#  error cmake_ENDIANNESS big
++# elif (__BYTE_ORDER == __PDP_ENDIAN)
++#  error cmake_ENDIANNESS pdp
++# else
++#  error cmake_ENDIANNESS unknown
++# endif
++#elif defined(_BIG_ENDIAN) && !defined(_LITTLE_ENDIAN)
++#  error cmake_ENDIANNESS big
++#elif defined(_LITTLE_ENDIAN) && !defined(_BIG_ENDIAN)
++#  error cmake_ENDIANNESS little
++#elif defined(__sparc) || defined(__sparc__) \
++   || defined(_POWER) || defined(__powerpc__) \
++   || defined(__ppc__) || defined(__hpux) || defined(__hppa) \
++   || defined(_MIPSEB) || defined(_POWER) \
++   || defined(__s390__) || defined(__ARMEB__)
++#  error cmake_ENDIANNESS big
++#elif defined(__i386__) || defined(__alpha__) \
++   || defined(__ia64) || defined(__ia64__) \
++   || defined(_M_IX86) || defined(_M_IA64) \
++   || defined(_M_ALPHA) || defined(__amd64) \
++   || defined(__amd64__) || defined(_M_AMD64) \
++   || defined(__x86_64) || defined(__x86_64__) \
++   || defined(_M_X64) || defined(__bfin__) || defined(__ARMEL__)
++#  error cmake_ENDIANNESS little
++#else
++#error cmake_ENDIANNESS unknown
++#endif
++#error cmake_ENDIANNESS unknown
++")
++
++function(determine_target_endianness output_var)
++   file(WRITE "${CMAKE_BINARY_DIR}/endianess.c" "${endiandetect_c_code}")
++
++    enable_language(C)
++
++    # Detect the architecture in a rather creative way...
++    # This compiles a small C program which is a series of ifdefs that selects a
++    # particular #error preprocessor directive whose message string contains the
++    # target architecture. The program will always fail to compile (both because
++    # file is not a valid C program, and obviously because of the presence of the
++    # #error preprocessor directives... but by exploiting the preprocessor in this
++    # way, we can detect the correct target architecture even when cross-compiling,
++    # since the program itself never needs to be run (only the compiler/preprocessor)
++    list(APPEND configurationArgs "-DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}")
++    if(DEFINED CMAKE_BUILD_TYPE)
++        list(APPEND configurationArgs "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
++    endif()
++    if(DEFINED CMAKE_TOOLCHAIN_FILE)
++        list(APPEND configurationArgs "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
++    endif()
++    if(RULE_LAUNCH_COMPILE)
++        list(APPEND configurationArgs "-DRULE_LAUNCH_COMPILE=${RULE_LAUNCH_COMPILE}")
++    endif()
++    if(RULE_LAUNCH_LINK)
++        list(APPEND configurationArgs "-DRULE_LAUNCH_LINK=${RULE_LAUNCH_LINK}")
++    endif()
++    if(DEFINED CMAKE_MODULE_PATH)
++        list(APPEND configurationArgs "-DCMAKE_MODULE_PATH=${CMAKE_MODULE_PATH}")
++    endif()
++    if(DEFINED CMAKE_REQUIRED_DEFINITIONS)
++        string(REPLACE ";" " " crd ${CMAKE_REQUIRED_DEFINITIONS})
++        list(APPEND configurationArgs "-DCMAKE_REQUIRED_DEFINITIONS=${crd}")
++    endif()
++
++    try_compile(
++        run_result_unused
++        "${CMAKE_BINARY_DIR}"
++        "${CMAKE_BINARY_DIR}/endianess.c"
++        OUTPUT_VARIABLE  ENDIANNESS
++        CMAKE_FLAGS ${configurationArgs}
++    )
++
++    # Parse the architecture name from the compiler output
++    string(REGEX MATCH "cmake_ENDIANNESS ([a-zA-Z0-9_]+)" ENDIANNESS "${ENDIANNESS}")
++
++    # Get rid of the value marker leaving just the architecture name
++    string(REPLACE "cmake_ENDIANNESS " "" ENDIANNESS "${ENDIANNESS}")
++
++    # If we are compiling with an unknown endianess this variable should
++    # already be set to "unknown" but in the case that it's empty (i.e. due
++    # to a typo in the code), then set it to unknown
++    if (NOT ENDIANNESS)
++        set(ENDIANNESS unknown)
++    endif()
++
++    set(${output_var} "${ENDIANNESS}" PARENT_SCOPE)
++endfunction()
+\ No newline at end of file
+diff --git a/cmake/FindLibGCrypt.cmake b/cmake/FindLibGCrypt.cmake
+new file mode 100644
+index 00000000..3d189bb3
+--- /dev/null
++++ b/cmake/FindLibGCrypt.cmake
+@@ -0,0 +1,93 @@
++# - Try to find the libgcrypt library
++# Once done this will define
++#
++#  LIBGCRYPT_FOUND - system has libgcrypt
++#  LIBGCRYPT_INCLUDE_DIR - the libgcrypt include directory
++#  LIBGCRYPT_LIBRARIES - Link these to use libgcrypt
++
++# Copyright (c) 2010 Joris Guisson <joris.guisson@gmail.com>
++# Copyright (c) 2007 Charles Connell <charles@connells.org> (This was based upon FindKopete.cmake)
++#
++# Redistribution and use is allowed according to the terms of the BSD license.
++# For details see the accompanying COPYING-CMAKE-SCRIPTS file.
++
++macro(FindLibGCrypt)
++    if(LIBGCRYPT_INCLUDE_DIR AND LIBGCRYPT_LIBRARIES)
++
++    # read from cache
++    set(LIBGCRYPT_FOUND TRUE)
++
++    else(LIBGCRYPT_INCLUDE_DIR AND LIBGCRYPT_LIBRARIES)
++
++        FIND_PATH(LIBGCRYPT_INCLUDE_DIR
++            NAMES
++            gcrypt.h
++            PATHS
++            ${KDE4_INCLUDE_DIR}
++            ${INCLUDE_INSTALL_DIR}
++            PATH_SUFFIXES
++            libgcrypt
++        )
++
++        FIND_LIBRARY(LIBGCRYPT_LIBRARIES
++            NAMES
++            gcrypt
++            PATHS
++            ${KDE4_LIB_DIR}
++            ${LIB_INSTALL_DIR}
++        )
++
++        if(LIBGCRYPT_INCLUDE_DIR AND LIBGCRYPT_LIBRARIES)
++            set(LIBGCRYPT_FOUND TRUE)
++        endif(LIBGCRYPT_INCLUDE_DIR AND LIBGCRYPT_LIBRARIES)
++
++        if(MSVC)
++            FIND_LIBRARY(LIBGCRYPT_LIBRARIES_DEBUG
++                NAMES
++                gcryptd
++                PATHS
++                ${KDE4_LIB_DIR}
++                ${LIB_INSTALL_DIR}
++            )
++
++            if(NOT LIBGCRYPT_LIBRARIES_DEBUG)
++                set(LIBGCRYPT_FOUND FALSE)
++            endif(NOT LIBGCRYPT_LIBRARIES_DEBUG)
++
++            if(MSVC_IDE)
++                if( NOT LIBGCRYPT_LIBRARIES_DEBUG OR NOT LIBGCRYPT_LIBRARIES)
++                    message(FATAL_ERROR "\nCould NOT find the debug AND release version of the libgcrypt library.\nYou need to have both to use MSVC projects.\nPlease build and install both libgcrypt libraries first.\n")
++                endif( NOT LIBGCRYPT_LIBRARIES_DEBUG OR NOT LIBGCRYPT_LIBRARIES)
++            else(MSVC_IDE)
++                string(TOLOWER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE_TOLOWER)
++                if(CMAKE_BUILD_TYPE_TOLOWER MATCHES debug)
++                    set(LIBGCRYPT_LIBRARIES ${LIBGCRYPT_LIBRARIES_DEBUG})
++                else(CMAKE_BUILD_TYPE_TOLOWER MATCHES debug)
++                    set(LIBGCRYPT_LIBRARIES ${LIBGCRYPT_LIBRARIES})
++                endif(CMAKE_BUILD_TYPE_TOLOWER MATCHES debug)
++            endif(MSVC_IDE)
++        endif(MSVC)
++
++        if(LIBGCRYPT_FOUND)
++            if(NOT LIBGCRYPT_FIND_QUIETLY)
++                message(STATUS "Found libgcrypt: ${LIBGCRYPT_LIBRARIES} ")
++            endif(NOT LIBGCRYPT_FIND_QUIETLY)
++        else(LIBGCRYPT_FOUND)
++            if(LIBGCRYPT_FIND_REQUIRED)
++                if(NOT LIBGCRYPT_INCLUDE_DIR)
++                    message(FATAL_ERROR "Could not find libgcrypt includes.")
++                endif(NOT LIBGCRYPT_INCLUDE_DIR)
++                if(NOT LIBGCRYPT_LIBRARIES)
++                    message(FATAL_ERROR "Could not find libgcrypt library.")
++                endif(NOT LIBGCRYPT_LIBRARIES)
++            else(LIBGCRYPT_FIND_REQUIRED)
++                if(NOT LIBGCRYPT_INCLUDE_DIR)
++                    message(STATUS "Could not find libgcrypt includes.")
++                endif(NOT LIBGCRYPT_INCLUDE_DIR)
++                if(NOT LIBGCRYPT_LIBRARIES)
++                    message(STATUS "Could not find libgcrypt library.")
++                endif(NOT LIBGCRYPT_LIBRARIES)
++            endif(LIBGCRYPT_FIND_REQUIRED)
++        endif(LIBGCRYPT_FOUND)
++    endif(LIBGCRYPT_INCLUDE_DIR AND LIBGCRYPT_LIBRARIES)
++endmacro()
+diff --git a/cmake/FindLibMagic.cmake b/cmake/FindLibMagic.cmake
+new file mode 100644
+index 00000000..ffa3aecb
+--- /dev/null
++++ b/cmake/FindLibMagic.cmake
+@@ -0,0 +1,76 @@
++# - Try to find libmagic header and library
++#
++# Usage of this module as follows:
++#
++#     find_package(LibMagic)
++#
++# Variables used by this module, they can change the default behaviour and need
++# to be set before calling find_package:
++#
++#  LibMagic_ROOT_DIR         Set this variable to the root installation of
++#                            libmagic if the module has problems finding the
++#                            proper installation path.
++#
++# Variables defined by this module:
++#
++#  LIBMAGIC_FOUND              System has libmagic, magic.h, and file
++#  LibMagic_FILE_EXE           Path to the 'file' command
++#  LibMagic_VERSION            Version of libmagic
++#  LibMagic_LIBRARY            The libmagic library
++#  LibMagic_INCLUDE_DIR        The location of magic.h
++
++macro(FindLibMagic)
++    find_path(LibMagic_ROOT_DIR
++        NAMES include/magic.h
++    )
++
++    if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
++        # the static version of the library is preferred on OS X for the
++        # purposes of making packages (libmagic doesn't ship w/ OS X)
++        set(libmagic_names libmagic.a magic)
++    else ()
++        set(libmagic_names magic)
++    endif ()
++
++    find_file(LibMagic_FILE_EXE
++        NAMES file
++        HINTS ${LibMagic_ROOT_DIR}/bin
++    )
++
++    find_library(LibMagic_LIBRARY
++        NAMES ${libmagic_names}
++        HINTS ${LibMagic_ROOT_DIR}/lib
++    )
++
++    find_path(LibMagic_INCLUDE_DIR
++        NAMES magic.h
++        HINTS ${LibMagic_ROOT_DIR}/include
++    )
++
++    if (LibMagic_FILE_EXE)
++        execute_process(COMMAND "${LibMagic_FILE_EXE}" --version
++                        ERROR_VARIABLE  LibMagic_VERSION
++                        OUTPUT_VARIABLE LibMagic_VERSION)
++        string(REGEX REPLACE "^file-([0-9.]+).*$" "\\1"
++               LibMagic_VERSION "${LibMagic_VERSION}")
++        message(STATUS "libmagic version: ${LibMagic_VERSION}")
++    else ()
++        set(LibMagic_VERSION NOTFOUND)
++    endif ()
++
++    include(FindPackageHandleStandardArgs)
++    find_package_handle_standard_args(LibMagic DEFAULT_MSG
++        LibMagic_LIBRARY
++        LibMagic_INCLUDE_DIR
++        LibMagic_FILE_EXE
++        LibMagic_VERSION
++    )
++
++    mark_as_advanced(
++        LibMagic_ROOT_DIR
++        LibMagic_FILE_EXE
++        LibMagic_VERSION
++        LibMagic_LIBRARY
++        LibMagic_INCLUDE_DIR
++    )
++endmacro()
+\ No newline at end of file
+diff --git a/cmake/FindNSS.cmake b/cmake/FindNSS.cmake
+new file mode 100644
+index 00000000..1eaa8352
+--- /dev/null
++++ b/cmake/FindNSS.cmake
+@@ -0,0 +1,39 @@
++# - Try to find the NSS library
++# Once done this will define
++#
++#  NSS_FOUND - system has mozilla-nss lib
++#  NSS_INCLUDE_DIRS - the mozilla-nss include directories
++#  NSS_LDFLAGS - Link these to use mozilla-nss
++#  NSS_CFLAGS_OTHER - Compiler switches required for using NSS
++#
++# Copyright (c) 2006, Laurent Montel, <montel@kde.org>
++#
++# Redistribution and use is allowed according to the terms of the BSD license.
++# For details see the accompanying COPYING-CMAKE-SCRIPTS file.
++
++macro(FindNSS)
++    if(NSS_INCLUDE_DIRS AND NSS_LDFLAGS)
++
++    # in cache already
++    SET(NSS_FOUND TRUE)
++
++    else()
++      if(NOT WIN32)
++        find_package(PkgConfig)
++        pkg_search_module(NSS nss)
++      endif(NOT WIN32)
++
++      if (NSS_FOUND)
++        if (NOT Nss_FIND_QUIETLY)
++          message(STATUS "Found NSS: ${NSS_LDFLAGS}")
++        endif (NOT Nss_FIND_QUIETLY)
++      else (NSS_FOUND)
++        if (Nss_FIND_REQUIRED)
++          message(FATAL_ERROR "Could NOT find NSS")
++        endif (Nss_FIND_REQUIRED)
++      endif (NSS_FOUND)
++
++      mark_as_advanced(NSS_INCLUDE_DIRS NSS_LDFLAGS NSS_CFLAGS_OTHER NSS_VERSION)
++
++    endif()
++endmacro()
+\ No newline at end of file
+diff --git a/src/microhttpd/CMakeLists.txt b/src/microhttpd/CMakeLists.txt
+new file mode 100644
+index 00000000..86eaf67b
+--- /dev/null
++++ b/src/microhttpd/CMakeLists.txt
+@@ -0,0 +1,175 @@
++#
++# Cmake instructions file
++#
++cmake_minimum_required(VERSION 3.1)
++
++include(ProcessorCount)
++
++include_directories(${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR}/src/microhttpd ${PROJECT_SOURCE_DIR}/src/include)
++
++get_property(isSharedLibSupported GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS)
++
++if(isSharedLibSupported)
++    set(libraryType SHARED)
++else()
++    set(libraryType STATIC)
++endif()
++
++add_library(microhttpd ${libraryType}
++        connection.c
++        reason_phrase.c
++        daemon.c
++        internal.c
++        memorypool.c
++        mhd_mono_clock.c
++        sysfdsetsize.c
++        mhd_str.c
++        mhd_threads.c
++        mhd_sockets.c
++        mhd_itc.c
++        mhd_compat.c
++        mhd_mono_clock.c
++        mhd_send.c
++        response.c
++        #sha1.c
++        sha256.c
++        #sha512_256.c
++)
++
++if(NOT HAVE_SEARCH_H)
++    target_sources(microhttpd PRIVATE tsearch.c)
++endif()
++
++if(HAVE_POSTPROCESSOR)
++    target_sources(microhttpd PRIVATE postprocessor.c)
++endif()
++
++if(DAUTH_SUPPORT)
++    target_sources(microhttpd PRIVATE digestauth.c md5.c)
++endif()
++
++if(BAUTH_SUPPORT)
++    target_sources(microhttpd PRIVATE basicauth.c base64.c)
++endif()
++
++if(HTTPS_SUPPORT)
++    target_sources(microhttpd PRIVATE connection_https.c)
++endif()
++
++set_target_properties(microhttpd
++    PROPERTIES
++        # create *nix style library versions + symbolic links
++        VERSION ${major}.${minor}.${micro}
++        SOVERSION ${major}
++        INSTALL_RPATH ""
++)
++target_include_directories(microhttpd PRIVATE ${PROJECT_SOURCE_DIR}/src/microhttpd ${PROJECT_SOURCE_DIR}/src/include ${PROJECT_BINARY_DIR})
++target_compile_definitions(microhttpd PRIVATE ${CMAKE_REQUIRED_DEFINITIONS})
++target_link_libraries(microhttpd PRIVATE ${CMAKE_REQUIRED_LIBRARIES})
++
++if (NSS_FOUND)
++    target_link_libraries(microhttpd PRIVATE ${NSS_LDFLAGS})
++    target_compile_definitions(microhttpd PRIVATE ${NSS_CFLAGS_OTHER})
++endif()
++if (LIBGCRYPT_FOUND)
++    target_link_libraries(microhttpd PRIVATE ${LIBGCRYPT_LIBRARIES})
++endif()
++if (GNUTLS_FOUND)
++    target_link_libraries(microhttpd PRIVATE ${GNUTLS_LIBRARIES})
++    target_compile_definitions(microhttpd PRIVATE ${GNUTLS_DEFINITIONS})
++endif()
++if (HAVE_OPTION_VISIBILITY)
++    target_compile_options(microhttpd PRIVATE -fvisibility=hidden)
++endif()
++
++install(TARGETS microhttpd
++    EXPORT ${PROJECT_NAME}
++    RUNTIME DESTINATION bin
++    LIBRARY DESTINATION lib NAMELINK_SKIP
++    ARCHIVE DESTINATION lib)
++install(EXPORT ${PROJECT_NAME} NAMESPACE microhttpd DESTINATION lib/${PROJECT_NAME})
++install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/include/ DESTINATION include/microhttpd FILES_MATCHING PATTERN *.h PATTERN .svn EXCLUDE PERMISSIONS OWNER_READ GROUP_READ)
++
++if (ENABLE_TESTS)
++    ProcessorCount(CPU_COUNT)
++
++    if (MSVC)
++        set(SOCKET_LIBS Ws2_32)
++    endif()
++
++    if (NOT MSVC)
++        # it is not possible to compile test_str.c witn MSVC
++        add_executable(test_str_compare test_str.c mhd_str.c)
++        add_test(NAME str_compare COMMAND test_str_compare)
++
++        add_executable(test_str_to_value test_str.c mhd_str.c)
++        add_test(NAME str_to_value COMMAND test_str_to_value)
++    endif()
++
++    add_executable(test_str_token test_str_token.c mhd_str.c)
++    add_test(NAME str_token COMMAND test_str_token)
++
++    add_executable(test_http_reasons test_http_reasons.c reason_phrase.c mhd_str.c)
++    add_test(NAME http_reasons COMMAND test_http_reasons)
++
++    set(THREADS_HAVE_PTHREAD_ARG yes)
++    include(FindThreads)
++
++    add_executable(test_shutdown_select test_shutdown_select.c)
++    target_link_libraries(test_shutdown_select Threads::Threads ${SOCKET_LIBS})
++    target_compile_options(test_shutdown_select PRIVATE -DCPU_COUNT=${CPU_COUNT})
++    add_test(NAME shutdown_select COMMAND test_shutdown_select)
++    if (NOT HAVE_LISTEN_SHUTDOWN)
++        set_tests_properties(shutdown_select PROPERTIES WILL_FAIL yes)
++    endif()
++
++    add_executable(test_shutdown_poll test_shutdown_select.c mhd_threads.h)
++    target_link_libraries(test_shutdown_poll Threads::Threads ${SOCKET_LIBS})
++    target_compile_options(test_shutdown_poll PRIVATE -DCPU_COUNT=${CPU_COUNT})
++    add_test(NAME shutdown_poll COMMAND test_shutdown_poll)
++    if (NOT HAVE_LISTEN_SHUTDOWN)
++        set_tests_properties(shutdown_poll PROPERTIES WILL_FAIL yes)
++    endif()
++
++    add_executable(test_daemon test_daemon.c)
++    target_link_libraries(test_daemon microhttpd)
++    target_compile_options(test_daemon PRIVATE -DCPU_COUNT=${CPU_COUNT})
++    add_test(NAME daemon COMMAND test_daemon)
++
++    if (CMAKE_USE_PTHREADS_INIT)
++        if (ENABLE_UPGRADE)
++            add_executable(test_upgrade test_upgrade.c)
++            target_link_libraries(test_upgrade microhttpd)
++            target_compile_options(test_upgrade PRIVATE -std=c99 -DCPU_COUNT=${CPU_COUNT} ${GNUTLS_DEFINITIONS})
++            add_test(NAME upgrade COMMAND test_upgrade)
++
++            if (HTTPS_SUPPORT)
++                add_executable(test_upgrade_tls test_upgrade.c test_helpers.h mhd_sockets.h)
++                target_link_libraries(test_upgrade_tls microhttpd)
++                target_compile_options(test_upgrade_tls PRIVATE -std=c99 -DCPU_COUNT=${CPU_COUNT} ${GNUTLS_DEFINITIONS})
++                add_test(NAME upgrade_tls COMMAND test_upgrade_tls)
++            endif()
++        endif()
++    endif()
++
++    if (HAVE_POSTPROCESSOR)
++        if (NOT MSVC)
++            # it is not possible to compile test_postprocessor.c witn MSVC
++            
++            add_executable(test_postprocessor test_postprocessor.c)
++            target_link_libraries(test_postprocessor microhttpd)
++            target_compile_options(test_postprocessor PRIVATE -DCPU_COUNT=${CPU_COUNT} ${GNUTLS_DEFINITIONS})
++            add_test(NAME postprocessor COMMAND test_postprocessor)
++        endif()
++        
++        add_executable(test_postprocessor_large test_postprocessor_large.c)
++        target_link_libraries(test_postprocessor_large microhttpd)
++        target_compile_options(test_postprocessor_large PRIVATE -DCPU_COUNT=${CPU_COUNT} ${GNUTLS_DEFINITIONS})
++        add_test(NAME postprocessor_large COMMAND test_postprocessor_large)    
++        
++        add_executable(test_postprocessor_amp test_postprocessor_amp.c)
++        target_link_libraries(test_postprocessor_amp microhttpd)
++        target_compile_options(test_postprocessor_amp PRIVATE -DCPU_COUNT=${CPU_COUNT} ${GNUTLS_DEFINITIONS})
++        add_test(NAME postprocessor_amp COMMAND test_postprocessor_amp)    
++    endif()
++endif()
+-- 
+2.44.0.windows.1
+

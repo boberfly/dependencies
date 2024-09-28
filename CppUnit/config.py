@@ -10,12 +10,15 @@
 
 	"license" : "COPYING",
 
-	"dependencies" : [],
-
 	"commands" : [
 
-		"./configure --prefix {buildDir}",
-		"make install",
+		"mkdir moonrayBuild",
+		"cd moonrayBuild &&"
+			" cmake"
+			" -D CMAKE_INSTALL_PREFIX={buildDir}"
+			" -D CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON"
+			" ..",
+		"cd moonrayBuild && cmake --build . --config Release --target install -- {jobs}",
 
 	],
 

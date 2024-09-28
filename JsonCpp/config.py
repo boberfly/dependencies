@@ -14,8 +14,8 @@
 
 	"commands" : [
 
-		"mkdir gafferBuild",
-		"cd gafferBuild &&"
+		"mkdir moonrayBuild",
+		"cd moonrayBuild &&"
 			" cmake"
 			" -D CMAKE_INSTALL_PREFIX={buildDir}"
 			" -D CMAKE_INSTALL_LIBDIR={buildDir}/lib"
@@ -23,8 +23,9 @@
 			" -D JSONCPP_WITH_TESTS:BOOL=OFF"
 			" -D JSONCPP_WITH_POST_BUILD_UNITTEST:BOOL=OFF"
 			" -D PYTHON_EXECUTABLE={buildDir}/bin/python"
+			" -D CMAKE_BUILD_TYPE=Release"
 			" ..",
-		"cd gafferBuild && make install -j {jobs} VERBOSE=1",
+		"cd moonrayBuild && cmake --build . --config Release --target install -- {jobs}",
 
 	],
 

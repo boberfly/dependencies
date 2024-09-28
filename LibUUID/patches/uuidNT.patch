@@ -1,0 +1,42 @@
+From cefc1074c79ff1b218d755b97af991c077215026 Mon Sep 17 00:00:00 2001
+From: Alex Fuller <alex.fuller@flyingbark.com.au>
+Date: Wed, 31 Jul 2024 11:22:49 +1000
+Subject: [PATCH] CMake windows
+
+---
+ src/CMakeLists.txt | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 81619ca..943c64f 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,8 +1,9 @@
++set(CMAKE_POSITION_INDEPENDENT_CODE ON)
++
+ set(SRC
+     clear.c
+     compare.c
+     copy.c
+-    gen_uuid.c
+     isnull.c
+     pack.c
+     parse.c
+@@ -11,7 +12,13 @@ set(SRC
+     uuid_time.c
+ )
+ 
+-add_library(uuid SHARED ${SRC})
++if(WIN32)
++    list(APPEND SRC gen_uuid_nt.c)
++else()
++    list(APPEND SRC gen_uuid.c)
++endif()
++
++add_library(uuid STATIC ${SRC})
+ 
+ install(TARGETS uuid
+     RUNTIME DESTINATION lib
+-- 
+2.46.0.windows.1
+

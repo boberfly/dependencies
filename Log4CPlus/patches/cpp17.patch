@@ -1,0 +1,25 @@
+From 7b9ad7aec5688cc6d805e8883b3ac6e3d9e7abca Mon Sep 17 00:00:00 2001
+From: Alex Fuller <alex.fuller@flyingbark.com.au>
+Date: Tue, 6 Aug 2024 12:49:01 +1000
+Subject: [PATCH] C++ 17
+
+---
+ CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ec0f82d1..7cfc4296 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -19,7 +19,7 @@ set (CMAKE_POSITION_INDEPENDENT_CODE ON)
+ 
+ enable_language (CXX)
+ if (MSVC)
+-  #set (CMAKE_CXX_STANDARD 14)
++  set (CMAKE_CXX_STANDARD 17)
+   if (CMAKE_VS_PLATFORM_NAME MATCHES "ARM")
+     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
+   endif ()
+-- 
+2.46.0.windows.1
+

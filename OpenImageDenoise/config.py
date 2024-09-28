@@ -2,7 +2,7 @@
 
 	"downloads" : [
 
-		"https://github.com/OpenImageDenoise/oidn/releases/download/v2.2.2/oidn-2.2.2.src.tar.gz"
+		"https://github.com/RenderKit/oidn/releases/download/v2.3.0/oidn-2.3.0.src.zip"
 
 	],
 
@@ -10,30 +10,25 @@
 
 	"license" : "LICENSE.txt",
 
-	"dependencies" : ["ISPC"],
-
-	"environment" : {
-
-		"PATH" : "{buildDir}/bin:$PATH",
-		"LD_LIBRARY_PATH" : "{buildDir}/lib:$LD_LIBRARY_PATH",
-
-	},
+	"dependencies" : [],
 
 	"commands" : [
 
-		"mkdir gafferBuild",
-		"cd gafferBuild &&"
+		"mkdir build",
+		"cd build &&"
 			" cmake"
+			" -G {cmakeGenerator}"
 			" -D CMAKE_INSTALL_PREFIX={buildDir}"
 			" -D CMAKE_PREFIX_PATH={buildDir}"
 			" -D CMAKE_BUILD_TYPE=Release"
 			" -D CMAKE_INSTALL_LIBDIR={buildDir}/lib"
-			" -D TBB_ROOT={buildDir}"
-			" -D Python_EXECUTABLE=${buildDir}/bin/python"
-			" -D OIDN_APPS=OFF"
+			" -D Python_EXECUTABLE={buildDir}/bin/python"
+			" -D OIDN_APPS=ON"
+			" -D OIDN_APPS_OPENIMAGEIO=ON"
+			" -D OIDN_LIBRARY_NAME=MoonrayOpenImageDenoise"
 			" {extraArgs}"
 			" ..",
-		"cd gafferBuild && cmake --build . --config Release --target install -- -j {jobs}",
+		"cd build && cmake --build . --config Release --target install -- {jobs}",
 
 	],
 
@@ -41,7 +36,8 @@
 
 		"cmake/OpenImageDenoise*",
 		"include/OpenImageDenoise*",
-		"lib/*OpenImageDenoise*",
+		"lib/*",
+		"bin/*",
 
 	],
 
@@ -49,6 +45,7 @@
 
 		"environment" : {
 
+			"PATH" : "{buildDir}/bin:$PATH",
 			"LD_LIBRARY_PATH" : "{buildDir}/lib:$LD_LIBRARY_PATH",
 			"CUDACXX" : "/usr/local/cuda/bin/nvcc",
 
@@ -56,7 +53,7 @@
 
 		"publicVariables" : {
 
-			"extraArgs" : ""
+			"extraArgs" : " -D OIDN_DEVICE_CUDA=ON"
 
 		},
 
@@ -82,13 +79,13 @@
 
 		"environment" : {
 
-			"PATH" : "{buildDir}/lib;%PATH",
+			"PATH" : "{buildDir}/lib;%PATH%",
 
 		},
 
 		"publicVariables" : {
 
-			"extraArgs" : ""
+			"extraArgs" : " -D OIDN_DEVICE_CUDA=ON"
 
 		},
 

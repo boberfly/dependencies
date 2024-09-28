@@ -2,7 +2,7 @@
 
 	"downloads" : [
 
-		"https://github.com/log4cplus/log4cplus/archive/refs/tags/REL_1_1_2.tar.gz"
+		"https://github.com/log4cplus/log4cplus/releases/download/REL_2_1_1/log4cplus-2.1.1.tar.gz"
 
 	],
 
@@ -10,16 +10,20 @@
 
 	"license" : "LICENSE",
 
-	"dependencies" : [],
-
 	"commands" : [
 
-		"mkdir gafferBuild",
-		"cd gafferBuild &&"
+		"mkdir moonrayBuild",
+		"cd moonrayBuild &&"
 			" cmake"
 			" -D CMAKE_INSTALL_PREFIX={buildDir}"
+			" -D CMAKE_BUILD_TYPE=Release"
+			" -D LOG4CPLUS_ENABLE_DECORATED_LIBRARY_NAME=OFF"
+			" -D WITH_UNIT_TESTS=OFF"
+			" -D LOG4CPLUS_BUILD_TESTING=OFF"
+			" -D LOG4CPLUS_BUILD_LOGGINGSERVER=OFF"
+#			" -D LOG4CPLUS_ENABLE_THREAD_POOL=OFF"
 			" ..",
-		"cd gafferBuild && make install -j {jobs} VERBOSE=1",
+		"cd moonrayBuild && cmake --build . --config Release --target install -- {jobs}",
 
 	],
 

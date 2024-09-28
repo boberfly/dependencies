@@ -9,11 +9,9 @@
 
 	"license" : "LICENSE",
 
-	"dependencies" : [],
-
 	"commands" : [
 
-		"make install-include prefix={buildDir}",
+		"cp -R include/Random123 {buildDir}/include/Random123",
 
 	],
 
@@ -22,5 +20,15 @@
 		"include/Random123",
 
 	],
+
+	"platform:windows" : {
+
+		"commands" : [
+
+			"xcopy /E /I include\\Random123 {buildDir}\\include\\Random123",
+
+		]
+
+	}
 
 }
